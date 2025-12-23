@@ -1,218 +1,207 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from backend.database import engine, SessionLocal
-from backend.models import Base, GateEntry
+from backend.database import engine, get_db
+from backend import models, schemas, crud, auth
+from datetime import timedelta
+
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Store Management System")
 
-Base.metadata.create_all(bind=engine)
+@app.post("/token", response_model=dict)
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = crud.get_user_by_username(db, form_data.username)
+    if not user or not crud.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
-def get_db():
-    db = SessionLocal()
-    try:
-        return db
-    finally:
-        db.close()
+@app.get("/users/me", response_model=schemas.UserResponse)
+def read_users_me(current_user: models.User = Depends(auth.get_current_active_user)):
+    return current_user
 
+# --- Phase 1: Security Guard / Gate Entry ---
+
+@app.post("/gate-entry/", response_model=schemas.GateEntryResponse)
+def create_gate_entry(
+    entry: schemas.GateEntryCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.SECURITY and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Security Guard can create Gate Entries")
+        
+    
+    return crud.create_gate_entry(db=db, entry=entry, created_by_id=current_user.id)
+
+# --- Phase 2: Officer Approval (Stage 1) ---
+
+@app.get("/officer/pending-stage-1", response_model=list[schemas.GateEntryResponse])
+def get_officer_pending_entries(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can view pending approvals")
+        
+    return crud.get_pending_gate_entries_for_officer(db, current_user.id)
+
+@app.post("/gate-entry/{entry_id}/approve-stage-1", response_model=schemas.GateEntryResponse)
+def approve_gate_entry_stage_1(
+    entry_id: int,
+    action: schemas.ApprovalAction,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can approve")
+    
+    # 1. Get Entry
+    entry = db.query(models.GateEntry).filter(models.GateEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+        
+    # 2. Verify assigned officer
+    if entry.request_officer_id != current_user.id and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Not assigned to this officer")
+        
+    # 3. Verify Status
+    if entry.status != "PENDING_OFFICER_APPROVAL_1":
+        raise HTTPException(status_code=400, detail="Entry not pending stage 1 approval")
+        
+    # 4. Update Status based on Action
+    new_status = "APPROVED_STAGE_1" if action.action == models.ApprovalStatus.APPROVED else "REJECTED_STAGE_1"
+    
+    
+    # Note: In a real system we would likely log remarks in a separate history table
+    
+    return crud.update_gate_entry_status(db, entry, new_status)
+
+# --- Phase 3: Store Manager Entry & Enrichment ---
+
+@app.get("/store/pending", response_model=list[schemas.GateEntryResponse])
+def get_store_pending_entries(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.STORE_MANAGER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Store Manager can view pending entries")
+        
+    return crud.get_pending_store_entries(db)
+
+@app.post("/store/{entry_id}/process", response_model=schemas.GateEntryResponse)
+def process_store_entry(
+    entry_id: int,
+    data: schemas.InwardProcessCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.STORE_MANAGER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Store Manager can process entries")
+        
+    result = crud.process_store_entry(db, entry_id, data, current_user.id)
+    
+    if not result:
+        raise HTTPException(status_code=400, detail="Entry not found or not in correct status")
+        
+    return result
+
+# --- Phase 4: Officer Final Approval & Inventory Update ---
+
+@app.get("/officer/final-pending", response_model=list[schemas.GateEntryResponse])
+def get_officer_final_pending(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can view final pending approvals")
+        
+    return crud.get_pending_final_approval_entries(db, current_user.id)
+
+@app.post("/officer/{entry_id}/final-approve", response_model=schemas.GateEntryResponse)
+def final_approve_entry(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can final approve")
+        
+    result = crud.final_approve_gate_entry(db, entry_id, current_user.id)
+    
+    if not result:
+        raise HTTPException(status_code=400, detail="Entry not found or not in correct status")
+        
+    return result
+
+# --- Phase 5: Material Issue Workflow ---
+
+@app.post("/issue/request", response_model=schemas.MaterialIssueResponse)
+def request_material_issue(
+    issue: schemas.MaterialIssueCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.STORE_MANAGER and current_user.role != models.UserRole.ADMIN:
+        # Assuming Store Manager requests issues on behalf of depts. 
+        # (Or maybe any user could, but spec says Store Manager initiates "Material Issue Request by Store Manager")
+        raise HTTPException(status_code=403, detail="Only Store Manager can raise issue requests")
+        
+    return crud.request_issue(db, issue, current_user.id)
+
+@app.get("/officer/pending-issues", response_model=list[schemas.MaterialIssueResponse])
+def get_pending_issues(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can view pending issues")
+        
+    return crud.get_pending_issues(db)
+
+@app.post("/officer/issue/{issue_id}/approve", response_model=schemas.MaterialIssueResponse)
+def approve_material_issue(
+    issue_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can approve issues")
+        
+    result = crud.approve_issue(db, issue_id, current_user.id)
+    
+    if not result:
+        # Could be not found, already approved, or low stock
+        raise HTTPException(status_code=400, detail="Issue approval failed (check stock or status)")
+        
+    return result
+
+# --- Master Data: Materials ---
+
+@app.get("/materials", response_model=list[schemas.MaterialResponse])
+def get_materials(db: Session = Depends(get_db)):
+    # Any authenticated user can view materials? Yes.
+    return crud.get_materials(db)
+
+@app.post("/materials", response_model=schemas.MaterialResponse)
+def create_material(
+    material: schemas.MaterialCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.STORE_MANAGER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Store Manager/Admin can create materials")
+    return crud.create_material(db, material)
+
+# Utility for checking API status
 @app.get("/")
 def root():
-    return {"message": "Server running"}
-
-@app.post("/gate-entry/")
-def create_gate_entry(
-    vendor_name: str,
-    invoice_no: str,
-    material_desc: str,
-    quantity: int
-):
-    db: Session = SessionLocal()
-
-    entry = GateEntry(
-        vendor_name=vendor_name,
-        invoice_no=invoice_no,
-        material_desc=material_desc,
-        quantity=quantity,
-        status="PENDING_OFFICER_APPROVAL"
-    )
-
-    db.add(entry)
-    db.commit()
-    db.refresh(entry)
-    db.close()
-
-    return {
-        "message": "Gate entry created, pending officer approval",
-        "entry_id": entry.id,
-        "status": entry.status
-    }
-
-@app.post("/gate-entry/{entry_id}/approve")
-def approve_gate_entry(entry_id: int, officer_name: str):
-    db: Session = SessionLocal()
-
-    entry = db.query(GateEntry).filter(GateEntry.id == entry_id).first()
-
-    if not entry:
-        db.close()
-        return {"error": "Gate entry not found"}
-
-    if entry.status != "PENDING_OFFICER_APPROVAL":
-        db.close()
-        return {
-            "error": "Entry cannot be approved in current state",
-            "current_status": entry.status
-        }
-
-    entry.status = "APPROVED_BY_OFFICER"
-
-    db.commit()
-    db.refresh(entry)
-    db.close()
-
-    return {
-        "message": "Gate entry approved by officer",
-        "entry_id": entry.id,
-        "status": entry.status,
-        "approved_by": officer_name
-    }
-
-@app.post("/gate-entry/{entry_id}/reject")
-def reject_gate_entry(entry_id: int, officer_name: str, reason: str):
-    db: Session = SessionLocal()
-
-    entry = db.query(GateEntry).filter(GateEntry.id == entry_id).first()
-
-    if not entry:
-        db.close()
-        return {"error": "Gate entry not found"}
-
-    if entry.status != "PENDING_OFFICER_APPROVAL":
-        db.close()
-        return {
-            "error": "Entry cannot be rejected in current state",
-            "current_status": entry.status
-        }
-
-    entry.status = "REJECTED_BY_OFFICER"
-
-    db.commit()
-    db.refresh(entry)
-    db.close()
-
-    return {
-        "message": "Gate entry rejected by officer",
-        "entry_id": entry.id,
-        "status": entry.status,
-        "rejected_by": officer_name,
-        "reason": reason
-    }
-
-@app.get("/gate-entry/pending")
-def get_pending_gate_entries():
-    db: Session = SessionLocal()
-
-    entries = db.query(GateEntry).filter(
-        GateEntry.status == "PENDING_OFFICER_APPROVAL"
-    ).all()
-
-    db.close()
-
-    return entries
-
-
-@app.get("/store/pending")
-def get_store_pending_entries():
-    db: Session = SessionLocal()
-
-    entries = db.query(GateEntry).filter(
-        GateEntry.status == "APPROVED_BY_OFFICER"
-    ).all()
-
-    db.close()
-    return entries
-
-
-
-
-@app.post("/store/{entry_id}/update-location")
-def update_store_location(
-    entry_id: int,
-    store_room: str,
-    rack_no: str,
-    shelf_no: str
-):
-    db: Session = SessionLocal()
-
-    entry = db.query(GateEntry).filter(GateEntry.id == entry_id).first()
-
-    if not entry:
-        db.close()
-        return {"error": "Entry not found"}
-
-    if entry.status != "APPROVED_BY_OFFICER":
-        db.close()
-        return {
-            "error": "Entry not ready for store update",
-            "current_status": entry.status
-        }
-
-    entry.store_room = store_room
-    entry.rack_no = rack_no
-    entry.shelf_no = shelf_no
-    entry.status = "PENDING_OFFICER_FINAL_APPROVAL"
-
-    db.commit()
-    db.refresh(entry)
-    db.close()
-
-    return {
-        "message": "Store details updated",
-        "entry_id": entry.id,
-        "status": entry.status
-    }
-
-
-@app.get("/officer/final-pending")
-def officer_final_pending():
-    db: Session = SessionLocal()
-
-    entries = db.query(GateEntry).filter(
-        GateEntry.status == "PENDING_OFFICER_FINAL_APPROVAL"
-    ).all()
-
-    db.close()
-    return entries
-
-
-
-
-@app.post("/officer/{entry_id}/final-approve")
-def officer_final_approve(entry_id: int, officer_name: str):
-    db: Session = SessionLocal()
-
-    entry = db.query(GateEntry).filter(GateEntry.id == entry_id).first()
-
-    if not entry:
-        db.close()
-        return {"error": "Entry not found"}
-
-    if entry.status != "PENDING_OFFICER_FINAL_APPROVAL":
-        db.close()
-        return {
-            "error": "Entry not eligible for final approval",
-            "current_status": entry.status
-        }
-
-    entry.status = "FINAL_APPROVED"
-
-    db.commit()
-    db.refresh(entry)
-    db.close()
-
-    return {
-        "message": "Final approval completed",
-        "entry_id": entry.id,
-        "status": entry.status,
-        "approved_by": officer_name
-    }
-
+    return {"message": "Store Management System API is running"}
