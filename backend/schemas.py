@@ -57,10 +57,11 @@ class MaterialResponse(MaterialBase):
 # --- Gate Entry Schemas ---
 class GateEntryBase(BaseModel):
     vendor_name: str
+    vendor_location: Optional[str] = None
     vehicle_number: Optional[str] = None
     driver_name: Optional[str] = None
     driver_phone: Optional[str] = None
-    material_type_desc: str
+    material_type_desc: Optional[str] = None
     approx_quantity: Optional[int] = None
     request_officer_id: int # Officer ID to send approval to
 

@@ -66,12 +66,13 @@ class GateEntry(Base):
     id = Column(Integer, primary_key=True, index=True)
     gate_pass_number = Column(String, unique=True, index=True) # Generated ID
     vendor_name = Column(String) # Text entry if vendor master not linked yet, or fallback
+    vendor_location = Column(String, nullable=True) # Origin of vendor
     vehicle_number = Column(String, nullable=True)
     driver_name = Column(String, nullable=True)
     driver_phone = Column(String, nullable=True)
     
     # Who requested it / Initial details
-    material_type_desc = Column(String) # General description by Guard
+    material_type_desc = Column(String, nullable=True) # General description by Guard
     approx_quantity = Column(Integer, nullable=True) 
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())

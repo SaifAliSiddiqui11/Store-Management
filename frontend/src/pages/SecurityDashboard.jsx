@@ -6,11 +6,7 @@ import { Truck, Package, User, FileText } from 'lucide-react'
 const SecurityDashboard = () => {
     const [formData, setFormData] = useState({
         vendor_name: '',
-        vehicle_number: '',
-        driver_name: '',
-        driver_phone: '',
-        material_type_desc: '',
-        approx_quantity: '',
+        vendor_location: '',
         request_officer_id: 3 // Hardcoded to Officer ID 3 for MVP demo
     })
     const [loading, setLoading] = useState(false)
@@ -20,15 +16,19 @@ const SecurityDashboard = () => {
         e.preventDefault()
         setLoading(true)
         try {
-            const res = await api.post('/gate-entry/', formData)
+            const res = await api.post('/gate-entry/', {
+                ...formData,
+                // Send defaults for fields we removed from UI but are still part of schema (though optional now)
+                vehicle_number: null,
+                driver_name: null,
+                driver_phone: null,
+                material_type_desc: 'Standard Entry', // Providing a default desc or null if allowed
+                approx_quantity: 0
+            })
             setSuccess(`Entry Created! Gate Pass: ${res.data.gate_pass_number}`)
             setFormData({
                 vendor_name: '',
-                vehicle_number: '',
-                driver_name: '',
-                driver_phone: '',
-                material_type_desc: '',
-                approx_quantity: '',
+                vendor_location: '',
                 request_officer_id: 3
             })
         } catch (error) {
@@ -69,67 +69,30 @@ const SecurityDashboard = () => {
                     </div>
 
                     <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem' }}>Vehicle Number</label>
+                        <label style={{ display: 'block', marginBottom: '0.5rem' }}>Location / Origin</label>
                         <div style={{ position: 'relative' }}>
                             <Truck size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
-                            <input
-                                className="glass-input"
-                                style={{ paddingLeft: '2.5rem' }}
-                                value={formData.vehicle_number}
-                                onChange={e => setFormData({ ...formData, vehicle_number: e.target.value })}
-                                placeholder="MH-04-AB-1234"
-                            />
-                        </div>
-                    </div>
-
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem' }}>Driver Name</label>
-                        <input
-                            className="glass-input"
-                            value={formData.driver_name}
-                            onChange={e => setFormData({ ...formData, driver_name: e.target.value })}
-                            placeholder="Driver Name"
-                        />
-                    </div>
-
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem' }}>Contact Number</label>
-                        <input
-                            className="glass-input"
-                            value={formData.driver_phone}
-                            onChange={e => setFormData({ ...formData, driver_phone: e.target.value })}
-                            placeholder="Mobile No"
-                        />
-                    </div>
-
-                    <div style={{ gridColumn: '1 / -1' }}>
-                        <label style={{ display: 'block', marginBottom: '0.5rem' }}>Material Description</label>
-                        <div style={{ position: 'relative' }}>
-                            <FileText size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
                             <input
                                 required
                                 className="glass-input"
                                 style={{ paddingLeft: '2.5rem' }}
-                                value={formData.material_type_desc}
-                                onChange={e => setFormData({ ...formData, material_type_desc: e.target.value })}
-                                placeholder="Describe items (e.g. 5 boxes of spare parts)"
+                                value={formData.vendor_location}
+                                onChange={e => setFormData({ ...formData, vendor_location: e.target.value })}
+                                placeholder="Where are they coming from?"
                             />
                         </div>
                     </div>
 
                     <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem' }}>Approx Quantity</label>
-                        <div style={{ position: 'relative' }}>
-                            <Package size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
-                            <input
-                                type="number"
-                                className="glass-input"
-                                style={{ paddingLeft: '2.5rem' }}
-                                value={formData.approx_quantity}
-                                onChange={e => setFormData({ ...formData, approx_quantity: e.target.value })}
-                                placeholder="Total Qty"
-                            />
-                        </div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem' }}>Select Officer</label>
+                        <select
+                            className="glass-input"
+                            value={formData.request_officer_id}
+                            onChange={e => setFormData({ ...formData, request_officer_id: parseInt(e.target.value) })}
+                        >
+                            <option value={3}>Officer (Default)</option>
+                            {/* In a real app, we'd fetch list of officers */}
+                        </select>
                     </div>
 
                     <div style={{ gridColumn: '1 / -1', marginTop: '1rem' }}>
@@ -142,5 +105,4 @@ const SecurityDashboard = () => {
         </DashboardLayout>
     )
 }
-
 export default SecurityDashboard

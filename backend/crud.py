@@ -40,6 +40,7 @@ def create_gate_entry(db: Session, entry: schemas.GateEntryCreate, created_by_id
     db_entry = GateEntry(
         gate_pass_number=gate_pass_no,
         vendor_name=entry.vendor_name,
+        vendor_location=entry.vendor_location,
         vehicle_number=entry.vehicle_number,
         driver_name=entry.driver_name,
         driver_phone=entry.driver_phone,
