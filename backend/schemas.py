@@ -19,6 +19,24 @@ class UserResponse(UserBase):
     class Config:
         orm_mode = True
 
+class UserCreateByAdmin(BaseModel):
+    """Schema for admin to create users"""
+    username: str
+    email: EmailStr
+    password: str
+    role: UserRole
+
+class UserListResponse(BaseModel):
+    """Simplified user info for listings"""
+    id: int
+    username: str
+    email: Optional[str]
+    role: str
+    is_active: bool
+    
+    class Config:
+        orm_mode = True
+
 # --- Vendor Schemas ---
 class VendorBase(BaseModel):
     name: str

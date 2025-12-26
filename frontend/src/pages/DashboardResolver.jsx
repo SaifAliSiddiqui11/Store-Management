@@ -19,8 +19,7 @@ const DashboardResolver = () => {
                     navigate('/store')
                     break
                 case 'ADMIN':
-                    // Admin sees everything, maybe default to officer view
-                    navigate('/officer')
+                    navigate('/admin')
                     break
                 default:
                     navigate('/login')
