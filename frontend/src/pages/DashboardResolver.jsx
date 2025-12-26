@@ -13,14 +13,14 @@ const DashboardResolver = () => {
                     navigate('/security/new-entry')
                     break
                 case 'OFFICER':
-                    navigate('/officer/approvals')
+                    navigate('/officer')
                     break
                 case 'STORE_MANAGER':
-                    navigate('/store/pending')
+                    navigate('/store')
                     break
                 case 'ADMIN':
                     // Admin sees everything, maybe default to officer view
-                    navigate('/officer/approvals')
+                    navigate('/officer')
                     break
                 default:
                     navigate('/login')

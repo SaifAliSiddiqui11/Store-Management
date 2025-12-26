@@ -115,3 +115,20 @@ class MaterialIssueResponse(MaterialIssueBase):
     
     class Config:
         orm_mode = True
+
+# --- Store View Schemas ---
+class StoreItemResponse(BaseModel):
+    id: int # InwardItem ID (unique stock entry)
+    material_name: str
+    material_code: str
+    category: str
+    quantity: int
+    unit: str
+    store_room: Optional[str]
+    rack_no: Optional[str]
+    shelf_no: Optional[str]
+    inward_date: Optional[datetime]
+    officer_name: Optional[str] = None # For Store Manager view
+    
+    class Config:
+        orm_mode = True
