@@ -223,3 +223,55 @@ def create_material(db: Session, material: schemas.MaterialCreate):
     db.commit()
     db.refresh(db_material)
     return db_material
+
+# --- Store View Logic ---
+def get_store_items(db: Session, user: models.User):
+    """
+    Get inventory items with role-based visibility.
+    - Officer: Only items where they were the requesting officer.
+    - Store Manager: All items, showing the requesting officer's name.
+    """
+    
+    # Base Query: Join InwardItem -> InwardProcess -> GateEntry -> Material
+    # Also join Officer (User) via GateEntry.request_officer_id to get officer name
+    
+    query = db.query(
+        models.InwardItem,
+        models.Material,
+        models.User.username.label("officer_username"),
+        models.InwardProcess.invoice_date.label("inward_date") # Using invoice_date
+    ).join(
+        models.InwardProcess, models.InwardItem.inward_process_id == models.InwardProcess.id
+    ).join(
+        models.GateEntry, models.InwardProcess.gate_entry_id == models.GateEntry.id
+    ).join(
+        models.Material, models.InwardItem.material_id == models.Material.id
+    ).outerjoin( # Outer join in case officer is missing (unlikely but safe)
+        models.User, models.GateEntry.request_officer_id == models.User.id
+    )
+    
+    # Filter by Role
+    if user.role == models.UserRole.OFFICER:
+        query = query.filter(models.GateEntry.request_officer_id == user.id)
+    
+    # Execute
+    results = query.all()
+    
+    # Transform to Schema
+    response = []
+    for item, material, officer_name, inward_date in results:
+        response.append(schemas.StoreItemResponse(
+            id=item.id,
+            material_name=material.name,
+            material_code=material.code,
+            category=material.category,
+            quantity=item.quantity_received, # Showing original inward qty as per item record. NOTE: Current stock is on Material level, but request asked for "whatever is storing... corresponding to that material". If they want *current* stock filtered by officer, that's complex because stock is pooled. Assuming they want to see the *inward entries* they are responsible for.
+            unit=material.unit,
+            store_room=item.store_room,
+            rack_no=item.rack_no,
+            shelf_no=item.shelf_no,
+            inward_date=inward_date, # Or InwardProcess.created_at (not defined in model yet, need check)
+            officer_name=officer_name if user.role == models.UserRole.STORE_MANAGER else None
+        ))
+        
+    return response

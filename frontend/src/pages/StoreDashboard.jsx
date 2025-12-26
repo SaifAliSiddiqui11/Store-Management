@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
 import api from '../api/axios'
+import StoreInventoryTable from '../components/StoreInventoryTable'
 
 const StoreDashboard = () => {
     const [activeTab, setActiveTab] = useState('verification') // verification, inventory, issue
     const [items, setItems] = useState([]) // For pending verification
     const [materials, setMaterials] = useState([]) // For inventory
+    const [storeItems, setStoreItems] = useState([]) // For live inventory
     const [loading, setLoading] = useState(false)
     const [selectedItem, setSelectedItem] = useState(null) // For verification modal/form
 
@@ -45,9 +47,22 @@ const StoreDashboard = () => {
         setLoading(false)
     }
 
+    const fetchStoreItems = async () => {
+        setLoading(true)
+        try {
+            const res = await api.get('/store/items')
+            setStoreItems(res.data)
+        } catch (e) { console.error(e) }
+        setLoading(false)
+    }
+
     useEffect(() => {
         if (activeTab === 'verification') fetchPending()
-        if (activeTab === 'inventory' || activeTab === 'issue') fetchMaterials()
+        if (activeTab === 'inventory') {
+            fetchMaterials()
+            fetchStoreItems()
+        }
+        if (activeTab === 'issue') fetchMaterials()
     }, [activeTab])
 
     const handleVerifySubmit = async (e) => {
@@ -155,7 +170,7 @@ const StoreDashboard = () => {
                 {activeTab === 'inventory' && (
                     <>
                         <div style={{ marginBottom: '2rem', padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
-                            <h4>Add New Material</h4>
+                            <h4>Add New Material Master</h4>
                             <form onSubmit={handleCreateMaterial} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                                 <input className="glass-input" style={{ flex: 1 }} placeholder="Code (e.g. M001)" value={materialForm.code} onChange={e => setMaterialForm({ ...materialForm, code: e.target.value })} />
                                 <input className="glass-input" style={{ flex: 2 }} placeholder="Name" value={materialForm.name} onChange={e => setMaterialForm({ ...materialForm, name: e.target.value })} />
@@ -163,8 +178,12 @@ const StoreDashboard = () => {
                             </form>
                         </div>
 
+                        <h3 style={{ marginTop: '2rem', marginBottom: '1rem' }}>Live Store Inventory</h3>
+                        <StoreInventoryTable items={storeItems} userRole="STORE_MANAGER" />
+
+                        <h3 style={{ marginTop: '2rem', marginBottom: '1rem' }}>Material Master List</h3>
                         <table>
-                            <thead><tr><th>Code</th><th>Name</th><th>Stock</th><th>Unit</th></tr></thead>
+                            <thead><tr><th>Code</th><th>Name</th><th>Total Stock</th><th>Unit</th></tr></thead>
                             <tbody>
                                 {materials.map(m => (
                                     <tr key={m.id}><td>{m.code}</td><td>{m.name}</td><td style={{ fontWeight: 'bold', color: 'var(--success)' }}>{m.current_stock}</td><td>{m.unit}</td></tr>
@@ -179,6 +198,7 @@ const StoreDashboard = () => {
                         <h3>Raise Material Issue Request</h3>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                             <select className="glass-input" required value={issueForm.material_id} onChange={e => setIssueForm({ ...issueForm, material_id: e.target.value })}>
+                                <option value="">Select Material</option>
                                 <option value="">Select Material</option>
                                 {materials.map(m => <option key={m.id} value={m.id}>{m.name} (Stock: {m.current_stock})</option>)}
                             </select>

@@ -112,7 +112,25 @@ def process_store_entry(
     if not result:
         raise HTTPException(status_code=400, detail="Entry not found or not in correct status")
         
+    if not result:
+        raise HTTPException(status_code=400, detail="Entry not found or not in correct status")
+        
     return result
+
+# --- Store Inventory View ---
+
+@app.get("/store/items", response_model=list[schemas.StoreItemResponse], tags=["Store Operations"])
+def get_store_items(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """
+    Get inventory items with role-based visibility.
+    """
+    if current_user.role not in [models.UserRole.STORE_MANAGER, models.UserRole.OFFICER, models.UserRole.ADMIN]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    return crud.get_store_items(db, user=current_user)
 
 # --- Phase 4: Officer Final Approval & Inventory Update ---
 
