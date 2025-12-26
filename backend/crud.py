@@ -31,6 +31,28 @@ def create_user(db: Session, user: schemas.UserCreate):
     db.refresh(db_user)
     return db_user
 
+def get_all_officers(db: Session):
+    """Get all active officers for dropdown selection"""
+    return db.query(models.User).filter(
+        models.User.role == models.UserRole.OFFICER,
+        models.User.is_active == True
+    ).all()
+
+def create_user_by_admin(db: Session, user_data: schemas.UserCreateByAdmin):
+    """Admin creates a new user with specified role"""
+    hashed_password = get_password_hash(user_data.password)
+    db_user = models.User(
+        username=user_data.username,
+        email=user_data.email,
+        hashed_password=hashed_password,
+        role=user_data.role.value,  # Convert enum to string
+        is_active=True
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
 def create_gate_entry(db: Session, entry: schemas.GateEntryCreate, created_by_id: int):
     # Generate a simple Gate Pass Number (e.g., GP-UUID-Prefix or similar)
     # For simplicity, using a random UUID based string or timestamp could work, 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
 import api from '../api/axios'
 import { Truck, Package, User, FileText } from 'lucide-react'
@@ -7,10 +7,28 @@ const SecurityDashboard = () => {
     const [formData, setFormData] = useState({
         vendor_name: '',
         vendor_location: '',
-        request_officer_id: 3 // Hardcoded to Officer ID 3 for MVP demo
+        request_officer_id: ''
     })
+    const [officers, setOfficers] = useState([])
     const [loading, setLoading] = useState(false)
     const [success, setSuccess] = useState(null)
+
+    useEffect(() => {
+        // Fetch officers list on component mount
+        const fetchOfficers = async () => {
+            try {
+                const res = await api.get('/officers')
+                setOfficers(res.data)
+                // Set first officer as default if available
+                if (res.data.length > 0) {
+                    setFormData(prev => ({ ...prev, request_officer_id: res.data[0].id }))
+                }
+            } catch (e) {
+                console.error('Failed to fetch officers', e)
+            }
+        }
+        fetchOfficers()
+    }, [])
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -29,7 +47,7 @@ const SecurityDashboard = () => {
             setFormData({
                 vendor_name: '',
                 vendor_location: '',
-                request_officer_id: 3
+                request_officer_id: officers.length > 0 ? officers[0].id : ''
             })
         } catch (error) {
             console.error(error)
@@ -86,12 +104,17 @@ const SecurityDashboard = () => {
                     <div>
                         <label style={{ display: 'block', marginBottom: '0.5rem' }}>Select Officer</label>
                         <select
+                            required
                             className="glass-input"
                             value={formData.request_officer_id}
                             onChange={e => setFormData({ ...formData, request_officer_id: parseInt(e.target.value) })}
                         >
-                            <option value={3}>Officer (Default)</option>
-                            {/* In a real app, we'd fetch list of officers */}
+                            <option value="">-- Select Officer --</option>
+                            {officers.map(officer => (
+                                <option key={officer.id} value={officer.id}>
+                                    {officer.username} ({officer.email || 'No email'})
+                                </option>
+                            ))}
                         </select>
                     </div>
 

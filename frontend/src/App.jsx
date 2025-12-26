@@ -4,6 +4,7 @@ import DashboardResolver from './pages/DashboardResolver'
 import SecurityDashboard from './pages/SecurityDashboard'
 import OfficerDashboard from './pages/OfficerDashboard'
 import StoreDashboard from './pages/StoreDashboard'
+import AdminDashboard from './pages/AdminDashboard'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
@@ -36,6 +37,12 @@ function App() {
                 <Route path="/store/*" element={
                     <ProtectedRoute roles={['STORE_MANAGER', 'ADMIN']}>
                         <StoreDashboard />
+                    </ProtectedRoute>
+                } />
+
+                <Route path="/admin/*" element={
+                    <ProtectedRoute roles={['ADMIN']}>
+                        <AdminDashboard />
                     </ProtectedRoute>
                 } />
 

@@ -28,6 +28,37 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 def read_users_me(current_user: models.User = Depends(auth.get_current_active_user)):
     return current_user
 
+# --- Admin: User Management ---
+
+@app.post("/admin/users", response_model=schemas.UserResponse, tags=["Admin"])
+def create_user_admin(
+    user_data: schemas.UserCreateByAdmin,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Admin endpoint to create new users"""
+    if current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Check if username already exists
+    existing = crud.get_user_by_username(db, user_data.username)
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    return crud.create_user_by_admin(db, user_data)
+
+@app.get("/officers", response_model=list[schemas.UserListResponse], tags=["User Management"])
+def list_officers(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get all active officers for dropdown (accessible by Security and Admin)"""
+    if current_user.role not in [models.UserRole.SECURITY, models.UserRole.ADMIN, models.UserRole.STORE_MANAGER]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    return crud.get_all_officers(db)
+
+
 # --- Phase 1: Security Guard / Gate Entry ---
 
 @app.post("/gate-entry/", response_model=schemas.GateEntryResponse)
