@@ -165,7 +165,7 @@ def get_store_items(
 
 # --- Phase 4: Officer Final Approval & Inventory Update ---
 
-@app.get("/officer/final-pending", response_model=list[schemas.GateEntryResponse])
+@app.get("/officer/final-pending", response_model=list[schemas.GateEntryDetailedResponse])
 def get_officer_final_pending(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
@@ -206,7 +206,36 @@ def request_material_issue(
         
     return crud.request_issue(db, issue, current_user.id)
 
-@app.get("/officer/pending-issues", response_model=list[schemas.MaterialIssueResponse])
+@app.get("/officer/pending-issues")
+def get_pending_issues(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can view pending issues")
+    
+    issues = crud.get_pending_issues(db, current_user.id)
+    
+    # Manually construct response with material names
+    response = []
+    for issue in issues:
+        response.append({
+            "id": issue.id,
+            "material_id": issue.material_id,
+            "quantity_requested": issue.quantity_requested,
+            "purpose": issue.purpose,
+            "requesting_dept": issue.requesting_dept,
+            "officer_id": issue.officer_id,
+            "status": issue.status,
+            "requested_by_id": issue.requested_by_id,
+            "issue_note_id": issue.issue_note_id,
+            "material_name": issue.material.name if issue.material else None,
+            "approved_at": issue.approved_at,
+            "approver_name": None
+        })
+    
+    return response
+
 def get_pending_issues(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
@@ -214,9 +243,39 @@ def get_pending_issues(
     if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Only Officers can view pending issues")
         
-    return crud.get_pending_issues(db)
+    return crud.get_pending_issues(db, current_user.id)
 
-@app.post("/officer/issue/{issue_id}/approve", response_model=schemas.MaterialIssueResponse)
+@app.post("/officer/issue/{issue_id}/approve")
+def approve_material_issue(
+    issue_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can approve issues")
+    
+    result = crud.approve_issue(db, issue_id, current_user.id)
+    
+    if not result:
+        # Could be not found, already approved, or low stock
+        raise HTTPException(status_code=400, detail="Issue approval failed (check stock or status)")
+    
+    # Return as dictionary like in pending-issues
+    return {
+        "id": result.id,
+        "material_id": result.material_id,
+        "quantity_requested": result.quantity_requested,
+        "purpose": result.purpose,
+        "requesting_dept": result.requesting_dept,
+        "officer_id": result.officer_id,
+        "status": result.status,
+        "requested_by_id": result.requested_by_id,
+        "issue_note_id": result.issue_note_id,
+        "material_name": result.material.name if result.material else None,
+        "approved_at": result.approved_at,
+        "approver_name": current_user.username
+    }
+
 def approve_material_issue(
     issue_id: int,
     db: Session = Depends(get_db),
@@ -254,3 +313,56 @@ def create_material(
 @app.get("/")
 def root():
     return {"message": "Store Management System API is running"}
+
+# Material Issue History and Receipt
+@app.get("/store/issue-history")
+def get_store_issue_history(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.STORE_MANAGER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Store Managers can view issue history")
+    
+    issues = crud.get_issue_history(db, current_user.id)
+    
+    # Return as list of dictionaries
+    response = []
+    for issue in issues:
+        response.append({
+            "id": issue.id,
+            "material_id": issue.material_id,
+            "quantity_requested": issue.quantity_requested,
+            "purpose": issue.purpose,
+            "requesting_dept": issue.requesting_dept,
+            "officer_id": issue.officer_id,
+            "status": issue.status,
+            "requested_by_id": issue.requested_by_id,
+            "issue_note_id": issue.issue_note_id,
+            "material_name": issue.material.name if issue.material else None,
+            "approved_at": issue.approved_at.isoformat() if issue.approved_at else None,
+            "approver_name": None
+        })
+    
+    return response
+
+def get_store_issue_history(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.STORE_MANAGER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Store Managers can view issue history")
+        
+    return crud.get_issue_history(db, current_user.id)
+
+@app.get("/issue/{issue_id}/receipt")
+def download_issue_receipt(
+    issue_id: int,
+    db: Session = Depends(get_db)
+):
+    from fastapi.responses import PlainTextResponse
+    
+    receipt = crud.generate_issue_receipt(db, issue_id)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found or issue not approved")
+    
+    return PlainTextResponse(content=receipt, headers={"Content-Disposition": f"attachment; filename=receipt_issue_{issue_id}.txt"})

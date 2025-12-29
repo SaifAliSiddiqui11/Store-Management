@@ -20,6 +20,13 @@ class MaterialCategory(str, enum.Enum):
     CONSUMABLE = "CONSUMABLE"
     SPARE = "SPARE"
     ASSET = "ASSET"
+    FIRE_AND_SAFETY = "FIRE_AND_SAFETY"
+    AUTOMATION = "AUTOMATION"
+    ELECTRICAL = "ELECTRICAL"
+    MECHANICAL = "MECHANICAL"
+    CHEMICALS = "CHEMICALS"
+    OILS_AND_LUBRICANTS = "OILS_AND_LUBRICANTS"
+    STATIONARY = "STATIONARY"
 
 # --- Master Data ---
 
@@ -131,6 +138,12 @@ class InwardItem(Base):
     material_id = Column(Integer, ForeignKey("materials.id"), nullable=True) # Linked to master
     quantity_received = Column(Integer)
     
+    # Material details (direct text entry)
+    material_description = Column(String, nullable=True)
+    material_category = Column(String, nullable=True)
+    material_unit = Column(String, nullable=True)
+    min_stock_level = Column(Integer, nullable=True)
+    
     # Storage Location
     store_room = Column(String, nullable=True)
     rack_no = Column(String, nullable=True)
@@ -166,8 +179,10 @@ class MaterialIssue(Base):
     
     # Workflow
     status = Column(String, default="PENDING_OFFICER_APPROVAL")
+    officer_id = Column(Integer, ForeignKey("users.id"))  # Officer who will approve this issue
     requested_by_id = Column(Integer, ForeignKey("users.id"))
     approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)  # Timestamp of approval
     
     # Issue Note
     issue_note_id = Column(String, unique=True, nullable=True) # Generated upon approval

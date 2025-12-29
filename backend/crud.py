@@ -100,6 +100,10 @@ def process_store_entry(db: Session, entry_id: int, data: schemas.InwardProcessC
     if not entry or entry.status != "APPROVED_STAGE_1":
         return None # Or raise Error
         
+    # Update Gate Entry Vendor Name if provided
+    if data.vendor_name:
+        entry.vendor_name = data.vendor_name
+
     # 2. Create Inward Process
     inward_process = models.InwardProcess(
         gate_entry_id=entry.id,
@@ -119,9 +123,27 @@ def process_store_entry(db: Session, entry_id: int, data: schemas.InwardProcessC
             quantity_received=item.quantity_received,
             store_room=item.store_room,
             rack_no=item.rack_no,
-            shelf_no=item.shelf_no
+            shelf_no=item.shelf_no,
+            # Save directly to Item
+            material_description=item.material_description,
+            material_category=item.material_category,
+            material_unit=item.material_unit,
+            min_stock_level=item.min_stock_level
         )
         db.add(db_item)
+
+        # Update Material Master if linked (Backwards compatibility or if we re-enable linking)
+        if item.material_id:
+            material = db.query(models.Material).filter(models.Material.id == item.material_id).first()
+            if material:
+                if item.material_description:
+                    material.description = item.material_description
+                if item.material_category:
+                    material.category = item.material_category
+                if item.material_unit:
+                    material.unit = item.material_unit
+                if item.min_stock_level is not None:
+                    material.min_stock_level = item.min_stock_level
     
     # 4. Update Main Entry Status
     entry.status = "PENDING_OFFICER_FINAL_APPROVAL"
@@ -131,7 +153,11 @@ def process_store_entry(db: Session, entry_id: int, data: schemas.InwardProcessC
     return entry
 
 def get_pending_final_approval_entries(db: Session, officer_id: int):
-    return db.query(GateEntry).filter(
+    from sqlalchemy.orm import joinedload
+    
+    return db.query(GateEntry).options(
+        joinedload(GateEntry.inward_process).joinedload(models.InwardProcess.items).joinedload(models.InwardItem.material)
+    ).filter(
         GateEntry.request_officer_id == officer_id,
         GateEntry.status == "PENDING_OFFICER_FINAL_APPROVAL"
     ).all()
@@ -179,6 +205,7 @@ def request_issue(db: Session, issue: schemas.MaterialIssueCreate, user_id: int)
         quantity_requested=issue.quantity_requested,
         purpose=issue.purpose,
         requesting_dept=issue.requesting_dept,
+        officer_id=issue.officer_id,
         requested_by_id=user_id,
         status="PENDING_OFFICER_APPROVAL"
     )
@@ -187,8 +214,22 @@ def request_issue(db: Session, issue: schemas.MaterialIssueCreate, user_id: int)
     db.refresh(db_issue)
     return db_issue
 
-def get_pending_issues(db: Session):
-    return db.query(models.MaterialIssue).filter(models.MaterialIssue.status == "PENDING_OFFICER_APPROVAL").all()
+def get_pending_issues(db: Session, officer_id: int):
+    from sqlalchemy.orm import joinedload
+    
+    # Explicitly query with joinedload to ensure material is loaded
+    results = db.query(models.MaterialIssue).options(
+        joinedload(models.MaterialIssue.material)
+    ).filter(
+        models.MaterialIssue.officer_id == officer_id,
+        models.MaterialIssue.status == "PENDING_OFFICER_APPROVAL"
+    ).all()
+    
+    # Force load the material relationship
+    for issue in results:
+        _ = issue.material  # Access the relationship to ensure it's loaded
+    
+    return results
 
 def approve_issue(db: Session, issue_id: int, officer_id: int):
     issue = db.query(models.MaterialIssue).filter(models.MaterialIssue.id == issue_id).first()
@@ -222,6 +263,7 @@ def approve_issue(db: Session, issue_id: int, officer_id: int):
     # Update Issue
     issue.status = "APPROVED"
     issue.approved_by_id = officer_id
+    issue.approved_at = datetime.datetime.now()
     issue.issue_note_id = f"NOTE-{uuid.uuid4().hex[:8].upper()}"
     
     db.commit()
@@ -252,25 +294,31 @@ def get_store_items(db: Session, user: models.User):
     Get inventory items with role-based visibility.
     - Officer: Only items where they were the requesting officer.
     - Store Manager: All items, showing the requesting officer's name.
+    
+    Only shows items from FINAL_APPROVED gate entries.
     """
     
-    # Base Query: Join InwardItem -> InwardProcess -> GateEntry -> Material
+    # Base Query: Join InwardItem -> InwardProcess -> GateEntry -> Material (LEFT JOIN)
     # Also join Officer (User) via GateEntry.request_officer_id to get officer name
     
     query = db.query(
         models.InwardItem,
         models.Material,
         models.User.username.label("officer_username"),
-        models.InwardProcess.invoice_date.label("inward_date") # Using invoice_date
+        models.InwardProcess.invoice_date.label("inward_date"),
+        models.GateEntry.status
     ).join(
         models.InwardProcess, models.InwardItem.inward_process_id == models.InwardProcess.id
     ).join(
         models.GateEntry, models.InwardProcess.gate_entry_id == models.GateEntry.id
-    ).join(
+    ).outerjoin( # LEFT JOIN for Material - may be NULL
         models.Material, models.InwardItem.material_id == models.Material.id
     ).outerjoin( # Outer join in case officer is missing (unlikely but safe)
         models.User, models.GateEntry.request_officer_id == models.User.id
     )
+    
+    # CRITICAL: Only show items from FINAL_APPROVED entries
+    query = query.filter(models.GateEntry.status == "FINAL_APPROVED")
     
     # Filter by Role
     if user.role == models.UserRole.OFFICER:
@@ -281,19 +329,95 @@ def get_store_items(db: Session, user: models.User):
     
     # Transform to Schema
     response = []
-    for item, material, officer_name, inward_date in results:
+    for item, material, officer_name, inward_date, gate_status in results:
+        # Use Material Master data if available, otherwise use InwardItem columns
+        if material:
+            material_name = material.name
+            material_code = material.code
+            category = material.category
+            unit = material.unit
+        else:
+            # Fallback to InwardItem data when no Material Master link
+            material_name = item.material_description or "Unknown"
+            material_code = "N/A"
+            category = item.material_category or "CONSUMABLE"
+            unit = item.material_unit or "Nos"
+        
         response.append(schemas.StoreItemResponse(
             id=item.id,
-            material_name=material.name,
-            material_code=material.code,
-            category=material.category,
-            quantity=item.quantity_received, # Showing original inward qty as per item record. NOTE: Current stock is on Material level, but request asked for "whatever is storing... corresponding to that material". If they want *current* stock filtered by officer, that's complex because stock is pooled. Assuming they want to see the *inward entries* they are responsible for.
-            unit=material.unit,
+            material_name=material_name,
+            material_code=material_code,
+            category=category,
+            quantity=item.quantity_received,
+            unit=unit,
             store_room=item.store_room,
             rack_no=item.rack_no,
             shelf_no=item.shelf_no,
-            inward_date=inward_date, # Or InwardProcess.created_at (not defined in model yet, need check)
+            inward_date=inward_date,
             officer_name=officer_name if user.role == models.UserRole.STORE_MANAGER else None
         ))
         
     return response
+
+def get_issue_history(db: Session, user_id: int):
+    """Get all material issues created by the store manager"""
+    from sqlalchemy.orm import joinedload
+    
+    # Get all issues created by this user
+    issues = db.query(models.MaterialIssue).options(
+        joinedload(models.MaterialIssue.material)
+    ).filter(
+        models.MaterialIssue.requested_by_id == user_id
+    ).order_by(models.MaterialIssue.id.desc()).all()
+    
+    # Force load material and get approver info
+    for issue in issues:
+        _ = issue.material
+        
+    return issues
+
+def generate_issue_receipt(db: Session, issue_id: int):
+    """Generate receipt text for an approved issue"""
+    from sqlalchemy.orm import joinedload
+    
+    issue = db.query(models.MaterialIssue).options(
+        joinedload(models.MaterialIssue.material)
+    ).filter(models.MaterialIssue.id == issue_id).first()
+    
+    if not issue or issue.status != "APPROVED":
+        return None
+        
+    # Get approver info
+    approver = db.query(models.User).filter(models.User.id == issue.approved_by_id).first()
+    approver_name = approver.username if approver else "Unknown"
+    
+    # Generate receipt text
+    receipt = f"""
+================================================================================
+                        MATERIAL ISSUE APPROVAL RECEIPT
+================================================================================
+
+Issue ID:           {issue.issue_note_id or f'ISS-{issue.id}'}
+Date & Time:        {issue.approved_at.strftime('%d-%m-%Y %I:%M %p') if issue.approved_at else 'N/A'}
+
+MATERIAL DETAILS
+--------------------------------------------------------------------------------
+Material Name:      {issue.material.name if issue.material else 'Unknown'}
+Material Code:      {issue.material.code if issue.material else 'N/A'}
+Quantity Issued:    {issue.quantity_requested} {issue.material.unit if issue.material else ''}
+
+REQUEST DETAILS
+--------------------------------------------------------------------------------
+Purpose:            {issue.purpose}
+Requesting Dept:    {issue.requesting_dept}
+
+APPROVAL DETAILS
+--------------------------------------------------------------------------------
+Approved By:        {approver_name}
+Status:             {issue.status}
+
+================================================================================
+                    This is a system-generated document
+================================================================================
+"""
+    return receipt

@@ -108,11 +108,18 @@ class InwardItemCreate(BaseModel):
     store_room: Optional[str] = None
     rack_no: Optional[str] = None
     shelf_no: Optional[str] = None
+    
+    # Fields to update Material Master
+    material_description: Optional[str] = None
+    material_category: Optional[str] = None
+    material_unit: Optional[str] = None
+    min_stock_level: Optional[int] = None
 
 class InwardProcessCreate(BaseModel):
     invoice_no: str
     invoice_date: datetime
     remarks: Optional[str] = None
+    vendor_name: Optional[str] = None # To update Gate Entry
     items: List[InwardItemCreate]
 
 # --- Material Issue Schemas ---
@@ -121,6 +128,7 @@ class MaterialIssueBase(BaseModel):
     quantity_requested: int
     purpose: str
     requesting_dept: str
+    officer_id: int  # Officer to approve this issue
 
 class MaterialIssueCreate(MaterialIssueBase):
     pass
@@ -130,9 +138,34 @@ class MaterialIssueResponse(MaterialIssueBase):
     status: str
     requested_by_id: int
     issue_note_id: Optional[str]
+    material_name: Optional[str] = None  # From Material relationship
+    approved_at: Optional[datetime] = None
+    approver_name: Optional[str] = None
     
     class Config:
         orm_mode = True
+        
+    @classmethod
+    def from_orm(cls, obj):
+        # Manually extract material_name from the relationship
+        material_name = None
+        if hasattr(obj, 'material') and obj.material:
+            material_name = obj.material.name
+        
+        return cls(
+            id=obj.id,
+            material_id=obj.material_id,
+            quantity_requested=obj.quantity_requested,
+            purpose=obj.purpose,
+            requesting_dept=obj.requesting_dept,
+            officer_id=obj.officer_id,
+            status=obj.status,
+            requested_by_id=obj.requested_by_id,
+            issue_note_id=obj.issue_note_id,
+            material_name=material_name,
+            approved_at=obj.approved_at,
+            approver_name="Officer"
+        )
 
 # --- Store View Schemas ---
 class StoreItemResponse(BaseModel):
@@ -147,6 +180,62 @@ class StoreItemResponse(BaseModel):
     shelf_no: Optional[str]
     inward_date: Optional[datetime]
     officer_name: Optional[str] = None # For Store Manager view
+    
+    class Config:
+        orm_mode = True
+
+# --- Enhanced Schemas for Officer Stage 2 View ---
+class InwardItemDetail(BaseModel):
+    """Detailed inward item info for Officer review"""
+    id: int
+    material_code: Optional[str] = None  # From Material Master if linked
+    material_description: Optional[str]
+    material_category: Optional[str]
+    material_unit: Optional[str]
+    quantity_received: int
+    store_room: Optional[str]
+    rack_no: Optional[str]
+    shelf_no: Optional[str]
+    min_stock_level: Optional[int]
+    
+    class Config:
+        orm_mode = True
+        
+    @classmethod
+    def from_orm(cls, obj):
+        # Populate material_code from Material relationship if exists
+        data = {
+            'id': obj.id,
+            'material_code': obj.material.code if obj.material else None,
+            'material_description': obj.material_description,
+            'material_category': obj.material_category,
+            'material_unit': obj.material_unit,
+            'quantity_received': obj.quantity_received,
+            'store_room': obj.store_room,
+            'rack_no': obj.rack_no,
+            'shelf_no': obj.shelf_no,
+            'min_stock_level': obj.min_stock_level
+        }
+        return cls(**data)
+
+class InwardProcessDetail(BaseModel):
+    """Store Manager verification details"""
+    invoice_no: Optional[str]
+    invoice_date: Optional[datetime]
+    remarks: Optional[str]
+    items: List[InwardItemDetail]
+    
+    class Config:
+        orm_mode = True
+
+class GateEntryDetailedResponse(GateEntryBase):
+    """Enhanced response with inward process details for Stage 2"""
+    id: int
+    gate_pass_number: str
+    created_at: datetime
+    created_by_id: int
+    status: str
+    inward_process: Optional[InwardProcessDetail] = None
     
     class Config:
         orm_mode = True

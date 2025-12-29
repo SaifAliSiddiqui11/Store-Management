@@ -4,21 +4,32 @@ import api from '../api/axios'
 import StoreInventoryTable from '../components/StoreInventoryTable'
 
 const StoreDashboard = () => {
-    const [activeTab, setActiveTab] = useState('verification') // verification, inventory, issue
+    const [activeTab, setActiveTab] = useState('verification') // verification, inventory, master, issue
     const [items, setItems] = useState([]) // For pending verification
     const [materials, setMaterials] = useState([]) // For inventory
     const [storeItems, setStoreItems] = useState([]) // For live inventory
+    const [issueRecords, setIssueRecords] = useState([]) // For issue history
+    const [officers, setOfficers] = useState([]) // For officer selection
     const [loading, setLoading] = useState(false)
     const [selectedItem, setSelectedItem] = useState(null) // For verification modal/form
 
     // Form states
     const [verifData, setVerifData] = useState({
         invoice_no: '',
-        invoice_date: '', // text for simplicity or date input
+        invoice_date: new Date().toISOString().split('T')[0], // Default to today
         remarks: '',
         qty_received: '',
         store_room: 'A',
-        material_id: '' // Need to select material too!
+        rack_no: 'R1',
+        shelf_no: 'S1',
+        material_id: '',
+        // Material Master Defaults (will populate on select)
+        description: '',
+        category: 'CONSUMABLE',
+        unit: 'Nos',
+        min_stock_level: 10,
+        // Gate Entry Updates
+        vendor_name: ''
     })
 
     const [materialForm, setMaterialForm] = useState({
@@ -26,8 +37,14 @@ const StoreDashboard = () => {
     })
 
     const [issueForm, setIssueForm] = useState({
-        material_id: '', quantity_requested: '', purpose: '', requesting_dept: ''
+        material_id: '', quantity_requested: '', purpose: '', requesting_dept: '', officer_id: ''
     })
+
+    const [materialSearch, setMaterialSearch] = useState('')
+    const filteredMaterials = materials.filter(m =>
+        m.name.toLowerCase().startsWith(materialSearch.toLowerCase()) ||
+        m.code.toLowerCase().startsWith(materialSearch.toLowerCase())
+    )
 
     const fetchPending = async () => {
         setLoading(true)
@@ -56,14 +73,88 @@ const StoreDashboard = () => {
         setLoading(false)
     }
 
+    const fetchOfficers = async () => {
+        try {
+            const res = await api.get('/officers')
+            setOfficers(res.data)
+            // Set first officer as default if available
+            if (res.data.length > 0 && !issueForm.officer_id) {
+                setIssueForm(prev => ({ ...prev, officer_id: res.data[0].id }))
+            }
+        } catch (e) { console.error(e) }
+    }
+
+    const fetchIssueHistory = async () => {
+        setLoading(true)
+        try {
+            const res = await api.get('/store/issue-history')
+            setIssueRecords(res.data)
+        } catch (e) { console.error(e) }
+        setLoading(false)
+    }
+
+    const downloadReceipt = async (issueId) => {
+        try {
+            const response = await api.get(`/issue/${issueId}/receipt`, {
+                responseType: 'blob'
+            })
+
+            // Create a download link
+            const url = window.URL.createObjectURL(new Blob([response.data]))
+            const link = document.createElement('a')
+            link.href = url
+            link.setAttribute('download', `receipt_issue_${issueId}.txt`)
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            window.URL.revokeObjectURL(url)
+        } catch (error) {
+            console.error('Receipt download error:', error)
+            alert('Failed to download receipt')
+        }
+    }
+
     useEffect(() => {
         if (activeTab === 'verification') fetchPending()
-        if (activeTab === 'inventory') {
+        if (activeTab === 'inventory' || activeTab === 'master') {
             fetchMaterials()
             fetchStoreItems()
         }
-        if (activeTab === 'issue') fetchMaterials()
+        if (activeTab === 'issue') {
+            fetchMaterials()
+            fetchOfficers()
+        }
+        if (activeTab === 'records') {
+            fetchIssueHistory()
+        }
     }, [activeTab])
+
+    // Auto-populate material details when material selected
+    const handleMaterialSelect = (materialId) => {
+        const mat = materials.find(m => m.id === parseInt(materialId))
+        if (mat) {
+            setVerifData(prev => ({
+                ...prev,
+                material_id: materialId,
+                description: mat.description || mat.name,
+                category: mat.category,
+                unit: mat.unit,
+                min_stock_level: mat.min_stock_level
+            }))
+        } else {
+            setVerifData(prev => ({ ...prev, material_id: materialId }))
+        }
+    }
+
+    // Pre-fill Vendor Name when item selected
+    useEffect(() => {
+        if (selectedItem) {
+            setVerifData(prev => ({
+                ...prev,
+                vendor_name: selectedItem.vendor_name
+            }))
+        }
+    }, [selectedItem])
 
     const handleVerifySubmit = async (e) => {
         e.preventDefault()
@@ -72,15 +163,21 @@ const StoreDashboard = () => {
         try {
             const payload = {
                 invoice_no: verifData.invoice_no,
-                invoice_date: new Date().toISOString(), // Simplified date
+                invoice_date: new Date(verifData.invoice_date).toISOString(),
                 remarks: verifData.remarks,
+                vendor_name: verifData.vendor_name,
                 items: [
                     {
-                        material_id: parseInt(verifData.material_id),
+                        material_id: verifData.material_id ? parseInt(verifData.material_id) : null,
                         quantity_received: parseInt(verifData.qty_received),
                         store_room: verifData.store_room,
-                        rack_no: 'A1',
-                        shelf_no: 'S1'
+                        rack_no: verifData.rack_no,
+                        shelf_no: verifData.shelf_no,
+                        // Material Master updates
+                        material_description: verifData.description,
+                        material_category: verifData.category,
+                        material_unit: verifData.unit,
+                        min_stock_level: parseInt(verifData.min_stock_level)
                     }
                 ]
             }
@@ -105,7 +202,7 @@ const StoreDashboard = () => {
         try {
             await api.post('/issue/request', issueForm)
             alert("Issue Requested")
-            setIssueForm({ material_id: '', quantity_requested: '', purpose: '', requesting_dept: '' })
+            setIssueForm({ material_id: '', quantity_requested: '', purpose: '', requesting_dept: '', officer_id: officers.length > 0 ? officers[0].id : '' })
         } catch (e) { alert("Failed") }
     }
 
@@ -120,8 +217,10 @@ const StoreDashboard = () => {
         <DashboardLayout title="Role: Store Manager">
             <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
                 <TabButton id="verification" label="Pending Verification" />
-                <TabButton id="inventory" label="Inventory & Master" />
+                <TabButton id="inventory" label="Store Inventory" />
+                <TabButton id="master" label="Material Master" />
                 <TabButton id="issue" label="Raise Issue" />
+                <TabButton id="records" label="Issue Records" />
             </div>
 
             <div className="glass-panel" style={{ padding: '2rem' }}>
@@ -130,19 +229,67 @@ const StoreDashboard = () => {
                         {selectedItem ? (
                             <form onSubmit={handleVerifySubmit}>
                                 <h3>Verify Entry: {selectedItem.gate_pass_number}</h3>
-                                <p>Vendor: {selectedItem.vendor_name} | Item: {selectedItem.material_type_desc}</p>
 
-                                <div className="dashboard-grid" style={{ marginTop: '1rem' }}>
-                                    <input className="glass-input" required placeholder="Invoice No" value={verifData.invoice_no} onChange={e => setVerifData({ ...verifData, invoice_no: e.target.value })} />
-                                    <input className="glass-input" required placeholder="Qty Received (Verified)" type="number" value={verifData.qty_received} onChange={e => setVerifData({ ...verifData, qty_received: e.target.value })} />
-                                    <input className="glass-input" placeholder="Store Room" value={verifData.store_room} onChange={e => setVerifData({ ...verifData, store_room: e.target.value })} />
+                                <div className="dashboard-grid" style={{ marginTop: '1rem', gridTemplateColumns: '1fr 1fr 1fr' }}>
+                                    {/* 1. Vendor & Invoice Details */}
+                                    <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+                                        <div>
+                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.8rem' }}>Vendor Name</label>
+                                            <input className="glass-input" required value={verifData.vendor_name} onChange={e => setVerifData({ ...verifData, vendor_name: e.target.value })} />
+                                        </div>
+                                        <div>
+                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.8rem' }}>Invoice Number</label>
+                                            <input className="glass-input" required value={verifData.invoice_no} onChange={e => setVerifData({ ...verifData, invoice_no: e.target.value })} />
+                                        </div>
+                                        <div>
+                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.8rem' }}>Invoice Date</label>
+                                            <input className="glass-input" type="date" required value={verifData.invoice_date} onChange={e => setVerifData({ ...verifData, invoice_date: e.target.value })} />
+                                        </div>
+                                    </div>
 
-                                    <select className="glass-input" value={verifData.material_id} onChange={e => setVerifData({ ...verifData, material_id: e.target.value })} onClick={() => { if (materials.length === 0) fetchMaterials() }}>
-                                        <option value="">Select Official Material Code</option>
-                                        {materials.map(m => <option key={m.id} value={m.id}>{m.code} - {m.name}</option>)}
-                                    </select>
+                                    {/* 2. Material Details */}
+                                    <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
+                                        <select className="glass-input" value={verifData.material_id} onChange={e => handleMaterialSelect(e.target.value)}>
+                                            <option value="">Select Official Material Code (Optional)</option>
+                                            {materials.map(m => <option key={m.id} value={m.id}>{m.code} - {m.name}</option>)}
+                                        </select>
+                                        <input className="glass-input" placeholder="Material Description" value={verifData.description} onChange={e => setVerifData({ ...verifData, description: e.target.value })} />
+                                    </div>
 
-                                    <input className="glass-input" placeholder="Remarks" value={verifData.remarks} onChange={e => setVerifData({ ...verifData, remarks: e.target.value })} style={{ gridColumn: '1/-1' }} />
+                                    <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+                                        <select className="glass-input" value={verifData.category} onChange={e => setVerifData({ ...verifData, category: e.target.value })}>
+                                            <option value="CONSUMABLE">Consumable</option>
+                                            <option value="SPARE">Spare</option>
+                                            <option value="ASSET">Asset</option>
+                                            <option value="FIRE_AND_SAFETY">Fire and Safety</option>
+                                            <option value="AUTOMATION">Automation</option>
+                                            <option value="ELECTRICAL">Electrical</option>
+                                            <option value="MECHANICAL">Mechanical</option>
+                                            <option value="CHEMICALS">Chemicals</option>
+                                            <option value="OILS_AND_LUBRICANTS">Oils and Lubricants</option>
+                                            <option value="STATIONARY">Stationary</option>
+                                        </select>
+                                        <select className="glass-input" value={verifData.unit} onChange={e => setVerifData({ ...verifData, unit: e.target.value })}>
+                                            <option value="Nos">Nos</option>
+                                            <option value="Kg">Kg</option>
+                                            <option value="Ltr">Ltr</option>
+                                            <option value="Mtr">Mtr</option>
+                                            <option value="Box">Box</option>
+                                            <option value="Set">Set</option>
+                                            <option value="Roll">Roll</option>
+                                        </select>
+                                        <input className="glass-input" type="number" placeholder="Min Stock Level" value={verifData.min_stock_level} onChange={e => setVerifData({ ...verifData, min_stock_level: e.target.value })} />
+                                    </div>
+
+                                    {/* 3. Receiving & Storage */}
+                                    <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
+                                        <input className="glass-input" required placeholder="Qty (Verified)" type="number" value={verifData.qty_received} onChange={e => setVerifData({ ...verifData, qty_received: e.target.value })} />
+                                        <input className="glass-input" placeholder="Store Room" value={verifData.store_room} onChange={e => setVerifData({ ...verifData, store_room: e.target.value })} />
+                                        <input className="glass-input" placeholder="Rack Number" value={verifData.rack_no} onChange={e => setVerifData({ ...verifData, rack_no: e.target.value })} />
+                                        <input className="glass-input" placeholder="Shelf / Bin" value={verifData.shelf_no} onChange={e => setVerifData({ ...verifData, shelf_no: e.target.value })} />
+                                    </div>
+
+                                    <input className="glass-input" placeholder="Remarks" value={verifData.remarks} onChange={e => setVerifData({ ...verifData, remarks: e.target.value })} style={{ gridColumn: '1/-1', marginTop: '1rem' }} />
                                 </div>
                                 <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
                                     <button type="submit" className="btn btn-primary">Submit Verification</button>
@@ -169,19 +316,32 @@ const StoreDashboard = () => {
 
                 {activeTab === 'inventory' && (
                     <>
+                        <h3 style={{ marginBottom: '1rem' }}>Live Store Inventory</h3>
+                        <StoreInventoryTable items={storeItems} userRole="STORE_MANAGER" />
+                    </>
+                )}
+
+                {activeTab === 'master' && (
+                    <>
                         <div style={{ marginBottom: '2rem', padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
                             <h4>Add New Material Master</h4>
                             <form onSubmit={handleCreateMaterial} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                                 <input className="glass-input" style={{ flex: 1 }} placeholder="Code (e.g. M001)" value={materialForm.code} onChange={e => setMaterialForm({ ...materialForm, code: e.target.value })} />
                                 <input className="glass-input" style={{ flex: 2 }} placeholder="Name" value={materialForm.name} onChange={e => setMaterialForm({ ...materialForm, name: e.target.value })} />
+                                <select className="glass-input" style={{ flex: 1 }} value={materialForm.unit} onChange={e => setMaterialForm({ ...materialForm, unit: e.target.value })}>
+                                    <option value="Nos">Nos</option>
+                                    <option value="Kg">Kg</option>
+                                    <option value="Ltr">Ltr</option>
+                                    <option value="Mtr">Mtr</option>
+                                    <option value="Box">Box</option>
+                                    <option value="Set">Set</option>
+                                    <option value="Roll">Roll</option>
+                                </select>
                                 <button className="btn btn-success" type="submit">Create</button>
                             </form>
                         </div>
 
-                        <h3 style={{ marginTop: '2rem', marginBottom: '1rem' }}>Live Store Inventory</h3>
-                        <StoreInventoryTable items={storeItems} userRole="STORE_MANAGER" />
-
-                        <h3 style={{ marginTop: '2rem', marginBottom: '1rem' }}>Material Master List</h3>
+                        <h3 style={{ marginBottom: '1rem' }}>Material Master List</h3>
                         <table>
                             <thead><tr><th>Code</th><th>Name</th><th>Total Stock</th><th>Unit</th></tr></thead>
                             <tbody>
@@ -197,17 +357,101 @@ const StoreDashboard = () => {
                     <form onSubmit={handleRequestIssue} style={{ maxWidth: '600px' }}>
                         <h3>Raise Material Issue Request</h3>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                            <select className="glass-input" required value={issueForm.material_id} onChange={e => setIssueForm({ ...issueForm, material_id: e.target.value })}>
-                                <option value="">Select Material</option>
-                                <option value="">Select Material</option>
-                                {materials.map(m => <option key={m.id} value={m.id}>{m.name} (Stock: {m.current_stock})</option>)}
-                            </select>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Search Material</label>
+                                <input
+                                    className="glass-input"
+                                    placeholder="Type to search material by name or code..."
+                                    value={materialSearch}
+                                    onChange={e => setMaterialSearch(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Select Material</label>
+                                <select className="glass-input" required value={issueForm.material_id} onChange={e => setIssueForm({ ...issueForm, material_id: e.target.value })}>
+                                    <option value="">Select Material</option>
+                                    {filteredMaterials.map(m => <option key={m.id} value={m.id}>{m.name} (Stock: {m.current_stock})</option>)}
+                                </select>
+                            </div>
                             <input className="glass-input" type="number" required placeholder="Quantity Required" value={issueForm.quantity_requested} onChange={e => setIssueForm({ ...issueForm, quantity_requested: e.target.value })} />
                             <input className="glass-input" required placeholder="Requesting Dept" value={issueForm.requesting_dept} onChange={e => setIssueForm({ ...issueForm, requesting_dept: e.target.value })} />
                             <input className="glass-input" required placeholder="Purpose" value={issueForm.purpose} onChange={e => setIssueForm({ ...issueForm, purpose: e.target.value })} />
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Select Officer</label>
+                                <select className="glass-input" required value={issueForm.officer_id} onChange={e => setIssueForm({ ...issueForm, officer_id: parseInt(e.target.value) })}>
+                                    <option value="">-- Select Officer --</option>
+                                    {officers.map(officer => (
+                                        <option key={officer.id} value={officer.id}>
+                                            {officer.username} ({officer.email || 'No email'})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
                             <button className="btn btn-primary">Send to Officer</button>
                         </div>
                     </form>
+                )}
+
+                {activeTab === 'records' && (
+                    <>
+                        <h3 style={{ marginBottom: '1.5rem' }}>Material Issue Records</h3>
+                        {loading ? (
+                            <p>Loading...</p>
+                        ) : issueRecords.length === 0 ? (
+                            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                No issue records found.
+                            </div>
+                        ) : (
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Issue ID</th>
+                                        <th>Material</th>
+                                        <th>Quantity</th>
+                                        <th>Purpose</th>
+                                        <th>Department</th>
+                                        <th>Status</th>
+                                        <th>Date & Time</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {issueRecords.map(record => (
+                                        <tr key={record.id}>
+                                            <td>
+                                                <span className="badge badge-blue">
+                                                    {record.issue_note_id || `ISS-${record.id}`}
+                                                </span>
+                                            </td>
+                                            <td>{record.material_name || 'Unknown'}</td>
+                                            <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>{record.quantity_requested}</td>
+                                            <td>{record.purpose}</td>
+                                            <td>{record.requesting_dept}</td>
+                                            <td>
+                                                <span className={`badge ${record.status === 'APPROVED' ? 'badge-success' : record.status === 'REJECTED' ? 'badge-danger' : 'badge-warning'}`}>
+                                                    {record.status}
+                                                </span>
+                                            </td>
+                                            <td>{record.approved_at ? new Date(record.approved_at).toLocaleString('en-IN') : '-'}</td>
+                                            <td>
+                                                {record.status === 'APPROVED' && (
+                                                    <a
+                                                        href={`http://localhost:8000/issue/${record.id}/receipt`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="btn btn-sm btn-success"
+                                                        style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', textDecoration: 'none' }}
+                                                    >
+                                                        Download Receipt
+                                                    </a>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </>
                 )}
             </div>
         </DashboardLayout>
