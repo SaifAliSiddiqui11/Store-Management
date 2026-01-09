@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from backend import models, auth
+from backend import models, auth, crud
 from backend.models import UserRole
 
 def seed_default_users(db: Session):
@@ -17,7 +17,7 @@ def seed_default_users(db: Session):
         user = db.query(models.User).filter(models.User.username == username).first()
         if not user:
             print(f"Seeding user: {username}")
-            hashed_pwd = auth.get_password_hash(password)
+            hashed_pwd = crud.get_password_hash(password)
             new_user = models.User(
                 username=username,
                 hashed_password=hashed_pwd,

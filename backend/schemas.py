@@ -17,7 +17,7 @@ class UserResponse(UserBase):
     id: int
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserCreateByAdmin(BaseModel):
     """Schema for admin to create users"""
@@ -35,7 +35,7 @@ class UserListResponse(BaseModel):
     is_active: bool
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- Vendor Schemas ---
 class VendorBase(BaseModel):
@@ -51,7 +51,7 @@ class VendorResponse(VendorBase):
     id: int
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- Material Schemas ---
 class MaterialBase(BaseModel):
@@ -70,7 +70,7 @@ class MaterialResponse(MaterialBase):
     current_stock: int
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- Gate Entry Schemas ---
 class GateEntryBase(BaseModel):
@@ -94,7 +94,7 @@ class GateEntryResponse(GateEntryBase):
     status: str
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- Common Response Schemas ---
 class ApprovalAction(BaseModel):
@@ -162,7 +162,7 @@ class MaterialIssueResponse(MaterialIssueBase):
     created_at: Optional[datetime] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- Store View Schemas ---
 class StoreItemResponse(BaseModel):
@@ -179,7 +179,7 @@ class StoreItemResponse(BaseModel):
     officer_name: Optional[str] = None # For Store Manager view
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- Enhanced Schemas for Officer Stage 2 View ---
 class InwardItemDetail(BaseModel):
@@ -196,7 +196,7 @@ class InwardItemDetail(BaseModel):
     min_stock_level: Optional[int]
     
     class Config:
-        orm_mode = True
+        from_attributes = True
         
     @classmethod
     def from_orm(cls, obj):
@@ -223,7 +223,7 @@ class InwardProcessDetail(BaseModel):
     items: List[InwardItemDetail]
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class GateEntryDetailedResponse(GateEntryBase):
     """Enhanced response with inward process details for Stage 2"""
@@ -235,4 +235,4 @@ class GateEntryDetailedResponse(GateEntryBase):
     inward_process: Optional[InwardProcessDetail] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
