@@ -122,6 +122,22 @@ class InwardProcessCreate(BaseModel):
     vendor_name: Optional[str] = None # To update Gate Entry
     items: List[InwardItemCreate]
 
+class InwardItemUpdate(BaseModel):
+    id: int
+    quantity_received: Optional[int] = None
+    store_room: Optional[str] = None
+    rack_no: Optional[str] = None
+    shelf_no: Optional[str] = None
+    material_description: Optional[str] = None
+    material_category: Optional[str] = None
+    material_unit: Optional[str] = None
+
+class InwardProcessUpdate(BaseModel):
+    invoice_no: Optional[str] = None
+    invoice_date: Optional[datetime] = None
+    remarks: Optional[str] = None
+    items: List[InwardItemUpdate]
+
 # --- Material Issue Schemas ---
 class MaterialIssueBase(BaseModel):
     material_id: int
@@ -139,33 +155,14 @@ class MaterialIssueResponse(MaterialIssueBase):
     requested_by_id: int
     issue_note_id: Optional[str]
     material_name: Optional[str] = None  # From Material relationship
+    material_unit: Optional[str] = None
     approved_at: Optional[datetime] = None
     approver_name: Optional[str] = None
+    material_category: Optional[str] = None
+    created_at: Optional[datetime] = None
     
     class Config:
         orm_mode = True
-        
-    @classmethod
-    def from_orm(cls, obj):
-        # Manually extract material_name from the relationship
-        material_name = None
-        if hasattr(obj, 'material') and obj.material:
-            material_name = obj.material.name
-        
-        return cls(
-            id=obj.id,
-            material_id=obj.material_id,
-            quantity_requested=obj.quantity_requested,
-            purpose=obj.purpose,
-            requesting_dept=obj.requesting_dept,
-            officer_id=obj.officer_id,
-            status=obj.status,
-            requested_by_id=obj.requested_by_id,
-            issue_note_id=obj.issue_note_id,
-            material_name=material_name,
-            approved_at=obj.approved_at,
-            approver_name="Officer"
-        )
 
 # --- Store View Schemas ---
 class StoreItemResponse(BaseModel):

@@ -196,7 +196,67 @@ def final_approve_gate_entry(db: Session, entry_id: int, officer_id: int):
     entry.status = "FINAL_APPROVED"
     
     db.commit()
+    db.commit()
+    return entry
+
+def reject_gate_entry_final(db: Session, entry_id: int, officer_id: int, remarks: str):
+    entry = db.query(GateEntry).filter(GateEntry.id == entry_id).first()
+    
+    if not entry or entry.status != "PENDING_OFFICER_FINAL_APPROVAL":
+        return None
+    
+    # Update Status and Remarks
+    entry.status = "REJECTED"
+    
+    # Add remarks to InwardProcess if exists, or append to gate entry somehow.
+    # Prefer updating InwardProcess remarks or GateEntry remarks.
+    # GateEntry has 'remarks' field? Let's check models.py lines 60+.
+    # Assuming GateEntry doesn't have remarks, or we can use InwardProcess.remarks.
+    if entry.inward_process:
+        entry.inward_process.remarks = f"{entry.inward_process.remarks} | REJECTED: {remarks}" if entry.inward_process.remarks else f"REJECTED: {remarks}"
+        entry.inward_process.final_approved_by_id = officer_id
+        entry.inward_process.final_approved_at = datetime.datetime.now() # Though rejected, we track who actioned it.
+        
+    db.commit()
     db.refresh(entry)
+    return entry
+
+def update_inward_process(db: Session, entry_id: int, update_data: schemas.InwardProcessUpdate):
+    entry = db.query(GateEntry).filter(GateEntry.id == entry_id).first()
+    if not entry or not entry.inward_process:
+        return None
+    
+    inward = entry.inward_process
+    
+    # Update Inward fields
+    if update_data.invoice_no is not None:
+        inward.invoice_no = update_data.invoice_no
+    if update_data.invoice_date is not None:
+        inward.invoice_date = update_data.invoice_date
+    if update_data.remarks is not None:
+        inward.remarks = update_data.remarks
+        
+    # Update Items
+    for item_update in update_data.items:
+        # Find the item
+        item = db.query(models.InwardItem).filter(models.InwardItem.id == item_update.id, models.InwardItem.inward_process_id == inward.id).first()
+        if item:
+            if item_update.quantity_received is not None:
+                item.quantity_received = item_update.quantity_received
+            if item_update.store_room is not None:
+                item.store_room = item_update.store_room
+            if item_update.rack_no is not None:
+                item.rack_no = item_update.rack_no
+            if item_update.shelf_no is not None:
+                item.shelf_no = item_update.shelf_no
+            if item_update.material_description is not None:
+                item.material_description = item_update.material_description
+            if item_update.material_category is not None:
+                item.material_category = item_update.material_category
+            if item_update.material_unit is not None:
+                item.material_unit = item_update.material_unit
+
+    db.commit()
     return entry
 
 def request_issue(db: Session, issue: schemas.MaterialIssueCreate, user_id: int):
@@ -230,6 +290,23 @@ def get_pending_issues(db: Session, officer_id: int):
         _ = issue.material  # Access the relationship to ensure it's loaded
     
     return results
+    
+def get_officer_approved_issues(db: Session, officer_id: int):
+    from sqlalchemy.orm import joinedload
+    
+    # Query executed and approved issues by this officer
+    issues = db.query(models.MaterialIssue).options(
+        joinedload(models.MaterialIssue.material)
+    ).filter(
+        models.MaterialIssue.officer_id == officer_id,
+        models.MaterialIssue.status == "APPROVED"
+    ).order_by(models.MaterialIssue.approved_at.desc()).all()
+    
+    # Force load relationship
+    for issue in issues:
+        _ = issue.material
+        
+    return issues
 
 def approve_issue(db: Session, issue_id: int, officer_id: int):
     issue = db.query(models.MaterialIssue).filter(models.MaterialIssue.id == issue_id).first()

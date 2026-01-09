@@ -1,0 +1,76 @@
+from sqlalchemy.orm import Session
+from backend.models import User, GateEntry, UserRole, InwardProcess, InwardItem
+from backend import schemas
+from backend import models
+from passlib.context import CryptContext
+import uuid
+import datetime
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ... (rest of the existing code remains) ...
+
+# At the end of the file, add new functions:
+
+def get_issue_history(db: Session, user_id: int):
+    """Get all material issues created by the store manager"""
+    from sqlalchemy.orm import joinedload
+    
+    # Get all issues created by this user
+    issues = db.query(models.MaterialIssue).options(
+        joinedload(models.MaterialIssue.material)
+    ).filter(
+        models.MaterialIssue.requested_by_id == user_id
+    ).order_by(models.MaterialIssue.id.desc()).all()
+    
+    # Force load material and get approver info
+    for issue in issues:
+        _ = issue.material
+        
+    return issues
+
+def generate_issue_receipt(db: Session, issue_id: int):
+    """Generate receipt text for an approved issue"""
+    from sqlalchemy.orm import joinedload
+    
+    issue = db.query(models.MaterialIssue).options(
+        joinedload(models.MaterialIssue.material)
+    ).filter(models.MaterialIssue.id == issue_id).first()
+    
+    if not issue or issue.status != "APPROVED":
+        return None
+        
+    # Get approver info
+    approver = db.query(models.User).filter(models.User.id == issue.approved_by_id).first()
+    approver_name = approver.username if approver else "Unknown"
+    
+    # Generate receipt text
+    receipt = f"""
+================================================================================
+                        MATERIAL ISSUE APPROVAL RECEIPT
+================================================================================
+
+Issue ID:           {issue.issue_note_id or f'ISS-{issue.id}'}
+Date & Time:        {issue.approved_at.strftime('%d-%m-%Y %I:%M %p') if issue.approved_at else 'N/A'}
+
+MATERIAL DETAILS
+--------------------------------------------------------------------------------
+Material Name:      {issue.material.name if issue.material else 'Unknown'}
+Material Code:      {issue.material.code if issue.material else 'N/A'}
+Quantity Issued:    {issue.quantity_requested} {issue.material.unit if issue.material else ''}
+
+REQUEST DETAILS
+--------------------------------------------------------------------------------
+Purpose:            {issue.purpose}
+Requesting Dept:    {issue.requesting_dept}
+
+APPROVAL DETAILS
+--------------------------------------------------------------------------------
+Approved By:        {approver_name}
+Status:             {issue.status}
+
+================================================================================
+                    This is a system-generated document
+================================================================================
+"""
+    return receipt

@@ -7,6 +7,7 @@ const SecurityDashboard = () => {
     const [formData, setFormData] = useState({
         vendor_name: '',
         vendor_location: '',
+        material_type_desc: '',
         request_officer_id: ''
     })
     const [officers, setOfficers] = useState([])
@@ -40,13 +41,13 @@ const SecurityDashboard = () => {
                 vehicle_number: null,
                 driver_name: null,
                 driver_phone: null,
-                material_type_desc: 'Standard Entry', // Providing a default desc or null if allowed
                 approx_quantity: 0
             })
             setSuccess(`Entry Created! Gate Pass: ${res.data.gate_pass_number}`)
             setFormData({
                 vendor_name: '',
                 vendor_location: '',
+                material_type_desc: '',
                 request_officer_id: officers.length > 0 ? officers[0].id : ''
             })
         } catch (error) {
@@ -97,6 +98,21 @@ const SecurityDashboard = () => {
                                 value={formData.vendor_location}
                                 onChange={e => setFormData({ ...formData, vendor_location: e.target.value })}
                                 placeholder="Where are they coming from?"
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem' }}>Material Description</label>
+                        <div style={{ position: 'relative' }}>
+                            <Package size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
+                            <input
+                                required
+                                className="glass-input"
+                                style={{ paddingLeft: '2.5rem' }}
+                                value={formData.material_type_desc}
+                                onChange={e => setFormData({ ...formData, material_type_desc: e.target.value })}
+                                placeholder="Brief description of material"
                             />
                         </div>
                     </div>

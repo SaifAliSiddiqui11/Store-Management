@@ -175,6 +175,25 @@ def get_officer_final_pending(
         
     return crud.get_pending_final_approval_entries(db, current_user.id)
 
+    return crud.get_pending_final_approval_entries(db, current_user.id)
+
+@app.put("/officer/{entry_id}/verification-details", response_model=schemas.GateEntryResponse)
+def update_verification_details(
+    entry_id: int,
+    update_data: schemas.InwardProcessUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can update verification details")
+        
+    result = crud.update_inward_process(db, entry_id, update_data)
+    
+    if not result:
+        raise HTTPException(status_code=400, detail="Update failed. Entry not found or invalid.")
+        
+    return result
+
 @app.post("/officer/{entry_id}/final-approve", response_model=schemas.GateEntryResponse)
 def final_approve_entry(
     entry_id: int,
@@ -185,6 +204,26 @@ def final_approve_entry(
         raise HTTPException(status_code=403, detail="Only Officers can final approve")
         
     result = crud.final_approve_gate_entry(db, entry_id, current_user.id)
+    
+    if not result:
+        raise HTTPException(status_code=400, detail="Entry not found or not in correct status")
+        
+    return result
+
+@app.post("/officer/{entry_id}/final-reject", response_model=schemas.GateEntryResponse)
+def final_reject_entry(
+    entry_id: int,
+    approval_action: schemas.ApprovalAction, # Reusing ApprovalAction to get remarks
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can final reject")
+    
+    if approval_action.action != schemas.ApprovalStatus.REJECTED:
+         raise HTTPException(status_code=400, detail="Invalid action")
+
+    result = crud.reject_gate_entry_final(db, entry_id, current_user.id, approval_action.remarks or "Rejected by Officer")
     
     if not result:
         raise HTTPException(status_code=400, detail="Entry not found or not in correct status")
@@ -206,7 +245,7 @@ def request_material_issue(
         
     return crud.request_issue(db, issue, current_user.id)
 
-@app.get("/officer/pending-issues")
+@app.get("/officer/pending-issues", response_model=list[schemas.MaterialIssueResponse])
 def get_pending_issues(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
@@ -214,36 +253,19 @@ def get_pending_issues(
     if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Only Officers can view pending issues")
     
-    issues = crud.get_pending_issues(db, current_user.id)
-    
-    # Manually construct response with material names
-    response = []
-    for issue in issues:
-        response.append({
-            "id": issue.id,
-            "material_id": issue.material_id,
-            "quantity_requested": issue.quantity_requested,
-            "purpose": issue.purpose,
-            "requesting_dept": issue.requesting_dept,
-            "officer_id": issue.officer_id,
-            "status": issue.status,
-            "requested_by_id": issue.requested_by_id,
-            "issue_note_id": issue.issue_note_id,
-            "material_name": issue.material.name if issue.material else None,
-            "approved_at": issue.approved_at,
-            "approver_name": None
-        })
-    
-    return response
-
-def get_pending_issues(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_active_user)
-):
-    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Only Officers can view pending issues")
-        
     return crud.get_pending_issues(db, current_user.id)
+
+    return crud.get_pending_issues(db, current_user.id)
+
+@app.get("/officer/approved-issues", response_model=list[schemas.MaterialIssueResponse])
+def get_officer_approved_issues(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != models.UserRole.OFFICER and current_user.role != models.UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Officers can view approved issues")
+        
+    return crud.get_officer_approved_issues(db, current_user.id)
 
 @app.post("/officer/issue/{issue_id}/approve")
 def approve_material_issue(
@@ -305,8 +327,8 @@ def create_material(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    if current_user.role != models.UserRole.STORE_MANAGER and current_user.role != models.UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Only Store Manager/Admin can create materials")
+    if current_user.role not in [models.UserRole.OFFICER, models.UserRole.ADMIN]:
+        raise HTTPException(status_code=403, detail="Only Officers can create materials")
     return crud.create_material(db, material)
 
 # Utility for checking API status

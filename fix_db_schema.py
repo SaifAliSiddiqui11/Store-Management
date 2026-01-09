@@ -18,7 +18,25 @@ def fix_schema():
                 print("Column 'vendor_location' already exists.")
             else:
                 print(f"Error adding column: {e}")
-                # It might be that the table doesn't exist? (Unlikely given the user's error)
+
+        # Add columns to inward_items
+        new_columns = [
+            ("material_description", "VARCHAR"),
+            ("material_category", "VARCHAR"),
+            ("material_unit", "VARCHAR"),
+            ("min_stock_level", "INTEGER")
+        ]
+        
+        for col_name, col_type in new_columns:
+            try:
+                print(f"Adding column '{col_name}' to 'inward_items'...")
+                conn.execute(text(f"ALTER TABLE inward_items ADD COLUMN {col_name} {col_type}"))
+                print(f"Successfully added '{col_name}'.")
+            except Exception as e:
+                if "duplicate column name" in str(e):
+                    print(f"Column '{col_name}' already exists.")
+                else:
+                    print(f"Error adding column {col_name}: {e}")
 
         # Check for other potential missing columns based on models.py (just in case)
         # InwardProcess.created_at was missing in verification? No, it was just not in model.

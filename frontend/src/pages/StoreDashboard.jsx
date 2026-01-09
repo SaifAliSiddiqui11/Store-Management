@@ -19,32 +19,44 @@ const StoreDashboard = () => {
         invoice_date: new Date().toISOString().split('T')[0], // Default to today
         remarks: '',
         qty_received: '',
-        store_room: 'A',
-        rack_no: 'R1',
-        shelf_no: 'S1',
+        store_room: '',
+        rack_no: '',
+        shelf_no: '',
         material_id: '',
         // Material Master Defaults (will populate on select)
         description: '',
-        category: 'CONSUMABLE',
-        unit: 'Nos',
-        min_stock_level: 10,
+        category: '',
+        unit: '',
         // Gate Entry Updates
         vendor_name: ''
     })
 
-    const [materialForm, setMaterialForm] = useState({
-        code: '', name: '', description: '', category: 'CONSUMABLE', unit: 'Nos', min_stock_level: 10
-    })
-
     const [issueForm, setIssueForm] = useState({
-        material_id: '', quantity_requested: '', purpose: '', requesting_dept: '', officer_id: ''
+        material_id: '', quantity_requested: '', purpose: '', officer_id: ''
     })
+    const [deptType, setDeptType] = useState('')
+    const [deptName, setDeptName] = useState('')
 
     const [materialSearch, setMaterialSearch] = useState('')
-    const filteredMaterials = materials.filter(m =>
-        m.name.toLowerCase().startsWith(materialSearch.toLowerCase()) ||
-        m.code.toLowerCase().startsWith(materialSearch.toLowerCase())
-    )
+    const [issueCategory, setIssueCategory] = useState('')
+
+    // Catalog Filters
+    const [catalogSearch, setCatalogSearch] = useState('')
+    const [catalogCategoryFilter, setCatalogCategoryFilter] = useState('')
+
+    const filteredMaterials = materials.filter(m => {
+        const matchesSearch = m.name.toLowerCase().includes(materialSearch.toLowerCase()) ||
+            m.code.toLowerCase().includes(materialSearch.toLowerCase())
+        const matchesCategory = issueCategory ? m.category === issueCategory : true
+        return matchesSearch && matchesCategory
+    })
+
+    const filteredCatalog = materials.filter(m => {
+        const matchesSearch = m.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+            m.code.toLowerCase().includes(catalogSearch.toLowerCase())
+        const matchesCategory = catalogCategoryFilter ? m.category === catalogCategoryFilter : true
+        return matchesSearch && matchesCategory
+    })
 
     const fetchPending = async () => {
         setLoading(true)
@@ -115,7 +127,10 @@ const StoreDashboard = () => {
     }
 
     useEffect(() => {
-        if (activeTab === 'verification') fetchPending()
+        if (activeTab === 'verification') {
+            fetchPending()
+            fetchMaterials()
+        }
         if (activeTab === 'inventory' || activeTab === 'master') {
             fetchMaterials()
             fetchStoreItems()
@@ -138,8 +153,7 @@ const StoreDashboard = () => {
                 material_id: materialId,
                 description: mat.description || mat.name,
                 category: mat.category,
-                unit: mat.unit,
-                min_stock_level: mat.min_stock_level
+                unit: mat.unit
             }))
         } else {
             setVerifData(prev => ({ ...prev, material_id: materialId }))
@@ -150,7 +164,17 @@ const StoreDashboard = () => {
     useEffect(() => {
         if (selectedItem) {
             setVerifData(prev => ({
-                ...prev,
+                invoice_no: '',
+                invoice_date: new Date().toISOString().split('T')[0],
+                remarks: '',
+                qty_received: '',
+                store_room: '',
+                rack_no: '',
+                shelf_no: '',
+                material_id: '',
+                description: '',
+                category: '',
+                unit: '',
                 vendor_name: selectedItem.vendor_name
             }))
         }
@@ -176,8 +200,7 @@ const StoreDashboard = () => {
                         // Material Master updates
                         material_description: verifData.description,
                         material_category: verifData.category,
-                        material_unit: verifData.unit,
-                        min_stock_level: parseInt(verifData.min_stock_level)
+                        material_unit: verifData.unit
                     }
                 ]
             }
@@ -187,22 +210,21 @@ const StoreDashboard = () => {
         } catch (e) { alert("Verification Failed") }
     }
 
-    const handleCreateMaterial = async (e) => {
-        e.preventDefault()
-        try {
-            await api.post('/materials', materialForm)
-            alert("Material Created")
-            fetchMaterials()
-            setMaterialForm({ code: '', name: '', description: '', category: 'CONSUMABLE', unit: 'Nos', min_stock_level: 10 })
-        } catch (e) { alert("Failed") }
-    }
+
 
     const handleRequestIssue = async (e) => {
         e.preventDefault()
         try {
-            await api.post('/issue/request', issueForm)
+            const payload = {
+                ...issueForm,
+                quantity_requested: parseInt(issueForm.quantity_requested),
+                requesting_dept: `${deptType} - ${deptName}`
+            }
+            await api.post('/issue/request', payload)
             alert("Issue Requested")
-            setIssueForm({ material_id: '', quantity_requested: '', purpose: '', requesting_dept: '', officer_id: officers.length > 0 ? officers[0].id : '' })
+            setIssueForm({ material_id: '', quantity_requested: '', purpose: '', officer_id: officers.length > 0 ? officers[0].id : '' })
+            setDeptType('')
+            setDeptName('')
         } catch (e) { alert("Failed") }
     }
 
@@ -249,8 +271,8 @@ const StoreDashboard = () => {
 
                                     {/* 2. Material Details */}
                                     <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
-                                        <select className="glass-input" value={verifData.material_id} onChange={e => handleMaterialSelect(e.target.value)}>
-                                            <option value="">Select Official Material Code (Optional)</option>
+                                        <select className="glass-input" required value={verifData.material_id} onChange={e => handleMaterialSelect(e.target.value)}>
+                                            <option value="">Select Official Material Code</option>
                                             {materials.map(m => <option key={m.id} value={m.id}>{m.code} - {m.name}</option>)}
                                         </select>
                                         <input className="glass-input" placeholder="Material Description" value={verifData.description} onChange={e => setVerifData({ ...verifData, description: e.target.value })} />
@@ -258,6 +280,7 @@ const StoreDashboard = () => {
 
                                     <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
                                         <select className="glass-input" value={verifData.category} onChange={e => setVerifData({ ...verifData, category: e.target.value })}>
+                                            <option value="">Select Category</option>
                                             <option value="CONSUMABLE">Consumable</option>
                                             <option value="SPARE">Spare</option>
                                             <option value="ASSET">Asset</option>
@@ -270,6 +293,7 @@ const StoreDashboard = () => {
                                             <option value="STATIONARY">Stationary</option>
                                         </select>
                                         <select className="glass-input" value={verifData.unit} onChange={e => setVerifData({ ...verifData, unit: e.target.value })}>
+                                            <option value="">Select Unit</option>
                                             <option value="Nos">Nos</option>
                                             <option value="Kg">Kg</option>
                                             <option value="Ltr">Ltr</option>
@@ -278,7 +302,6 @@ const StoreDashboard = () => {
                                             <option value="Set">Set</option>
                                             <option value="Roll">Roll</option>
                                         </select>
-                                        <input className="glass-input" type="number" placeholder="Min Stock Level" value={verifData.min_stock_level} onChange={e => setVerifData({ ...verifData, min_stock_level: e.target.value })} />
                                     </div>
 
                                     {/* 3. Receiving & Storage */}
@@ -297,19 +320,25 @@ const StoreDashboard = () => {
                                 </div>
                             </form>
                         ) : (
-                            <table>
-                                <thead><tr><th>Gate Pass</th><th>Vendor</th><th>Desc</th><th>Action</th></tr></thead>
-                                <tbody>
-                                    {items.map(item => (
-                                        <tr key={item.id}>
-                                            <td>{item.gate_pass_number}</td>
-                                            <td>{item.vendor_name}</td>
-                                            <td>{item.material_type_desc}</td>
-                                            <td><button className="btn btn-primary" onClick={() => setSelectedItem(item)}>Verify</button></td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            items.length === 0 ? (
+                                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                    No pending verifications.
+                                </div>
+                            ) : (
+                                <table>
+                                    <thead><tr><th>Gate Pass</th><th>Vendor</th><th>Desc</th><th>Action</th></tr></thead>
+                                    <tbody>
+                                        {items.map(item => (
+                                            <tr key={item.id}>
+                                                <td>{item.gate_pass_number}</td>
+                                                <td>{item.vendor_name}</td>
+                                                <td>{item.material_type_desc}</td>
+                                                <td><button className="btn btn-primary" onClick={() => setSelectedItem(item)}>Verify</button></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )
                         )}
                     </>
                 )}
@@ -323,33 +352,94 @@ const StoreDashboard = () => {
 
                 {activeTab === 'master' && (
                     <>
-                        <div style={{ marginBottom: '2rem', padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
-                            <h4>Add New Material Master</h4>
-                            <form onSubmit={handleCreateMaterial} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <input className="glass-input" style={{ flex: 1 }} placeholder="Code (e.g. M001)" value={materialForm.code} onChange={e => setMaterialForm({ ...materialForm, code: e.target.value })} />
-                                <input className="glass-input" style={{ flex: 2 }} placeholder="Name" value={materialForm.name} onChange={e => setMaterialForm({ ...materialForm, name: e.target.value })} />
-                                <select className="glass-input" style={{ flex: 1 }} value={materialForm.unit} onChange={e => setMaterialForm({ ...materialForm, unit: e.target.value })}>
-                                    <option value="Nos">Nos</option>
-                                    <option value="Kg">Kg</option>
-                                    <option value="Ltr">Ltr</option>
-                                    <option value="Mtr">Mtr</option>
-                                    <option value="Box">Box</option>
-                                    <option value="Set">Set</option>
-                                    <option value="Roll">Roll</option>
-                                </select>
-                                <button className="btn btn-success" type="submit">Create</button>
-                            </form>
+                        <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                            <h4 style={{ marginTop: 0, color: 'var(--primary)' }}>ℹ️ Material Catalog (Read-Only)</h4>
+                            <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                                Materials are created and managed by Officers. Contact an Officer if you need to add new materials to the system.
+                            </p>
                         </div>
 
-                        <h3 style={{ marginBottom: '1rem' }}>Material Master List</h3>
-                        <table>
-                            <thead><tr><th>Code</th><th>Name</th><th>Total Stock</th><th>Unit</th></tr></thead>
-                            <tbody>
-                                {materials.map(m => (
-                                    <tr key={m.id}><td>{m.code}</td><td>{m.name}</td><td style={{ fontWeight: 'bold', color: 'var(--success)' }}>{m.current_stock}</td><td>{m.unit}</td></tr>
-                                ))}
-                            </tbody>
-                        </table>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h3 style={{ margin: 0 }}>Material Catalog</h3>
+                            <div style={{ display: 'flex', gap: '1rem' }}>
+                                <select
+                                    className="glass-input"
+                                    style={{ width: '200px' }}
+                                    value={catalogCategoryFilter}
+                                    onChange={e => setCatalogCategoryFilter(e.target.value)}
+                                >
+                                    <option value="">All Categories</option>
+                                    <option value="CONSUMABLE">Consumable</option>
+                                    <option value="SPARE">Spare</option>
+                                    <option value="ASSET">Asset</option>
+                                    <option value="FIRE_AND_SAFETY">Fire and Safety</option>
+                                    <option value="AUTOMATION">Automation</option>
+                                    <option value="ELECTRICAL">Electrical</option>
+                                    <option value="MECHANICAL">Mechanical</option>
+                                    <option value="CHEMICALS">Chemicals</option>
+                                    <option value="OILS_AND_LUBRICANTS">Oils and Lubricants</option>
+                                    <option value="STATIONARY">Stationary</option>
+                                </select>
+                                <input
+                                    className="glass-input"
+                                    placeholder="Search Name or Code..."
+                                    style={{ width: '250px' }}
+                                    value={catalogSearch}
+                                    onChange={e => setCatalogSearch(e.target.value)}
+                                />
+                            </div>
+                        </div>
+
+                        {materials.length === 0 ? (
+                            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                No materials available yet.
+                            </div>
+                        ) : filteredCatalog.length === 0 ? (
+                            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                No materials match your search.
+                            </div>
+                        ) : (
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Code</th>
+                                        <th>Name</th>
+                                        <th>Category</th>
+                                        <th>Unit</th>
+                                        <th>Min Stock</th>
+                                        <th>Current Stock</th>
+                                        <th>Stock Deviation</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredCatalog.map(m => {
+                                        const deviation = m.min_stock_level > 0
+                                            ? ((m.current_stock - m.min_stock_level) / m.min_stock_level) * 100
+                                            : 0;
+                                        const deviationColor = deviation >= 0 ? 'var(--success)' : 'var(--danger)';
+
+                                        return (
+                                            <tr key={m.id}>
+                                                <td><span className="badge badge-blue">{m.code}</span></td>
+                                                <td style={{ fontWeight: 600 }}>{m.name}</td>
+                                                <td>{m.category}</td>
+                                                <td>{m.unit}</td>
+                                                <td>{m.min_stock_level}</td>
+                                                <td style={{
+                                                    fontWeight: 'bold',
+                                                    color: m.current_stock < m.min_stock_level ? 'var(--danger)' : 'var(--success)'
+                                                }}>
+                                                    {m.current_stock}
+                                                </td>
+                                                <td style={{ fontWeight: 'bold', color: deviationColor }}>
+                                                    {deviation > 0 ? '+' : ''}{deviation.toFixed(1)}%
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        )}
                     </>
                 )}
 
@@ -357,37 +447,112 @@ const StoreDashboard = () => {
                     <form onSubmit={handleRequestIssue} style={{ maxWidth: '600px' }}>
                         <h3>Raise Material Issue Request</h3>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                            <div>
-                                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Search Material</label>
-                                <input
-                                    className="glass-input"
-                                    placeholder="Type to search material by name or code..."
-                                    value={materialSearch}
-                                    onChange={e => setMaterialSearch(e.target.value)}
-                                />
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                <div>
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Filter by Category</label>
+                                    <select
+                                        className="glass-input"
+                                        value={issueCategory}
+                                        onChange={e => setIssueCategory(e.target.value)}
+                                    >
+                                        <option value="">All Categories</option>
+                                        <option value="CONSUMABLE">Consumable</option>
+                                        <option value="SPARE">Spare</option>
+                                        <option value="ASSET">Asset</option>
+                                        <option value="FIRE_AND_SAFETY">Fire and Safety</option>
+                                        <option value="AUTOMATION">Automation</option>
+                                        <option value="ELECTRICAL">Electrical</option>
+                                        <option value="MECHANICAL">Mechanical</option>
+                                        <option value="CHEMICALS">Chemicals</option>
+                                        <option value="OILS_AND_LUBRICANTS">Oils and Lubricants</option>
+                                        <option value="STATIONARY">Stationary</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Search Material</label>
+                                    <input
+                                        className="glass-input"
+                                        placeholder="Name or Code..."
+                                        value={materialSearch}
+                                        onChange={e => setMaterialSearch(e.target.value)}
+                                    />
+                                </div>
                             </div>
+
                             <div>
                                 <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Select Material</label>
                                 <select className="glass-input" required value={issueForm.material_id} onChange={e => setIssueForm({ ...issueForm, material_id: e.target.value })}>
-                                    <option value="">Select Material</option>
-                                    {filteredMaterials.map(m => <option key={m.id} value={m.id}>{m.name} (Stock: {m.current_stock})</option>)}
+                                    <option value="">-- Select Material --</option>
+                                    {filteredMaterials.map(m => (
+                                        <option key={m.id} value={m.id}>
+                                            {m.code} - {m.name} (Stock: {m.current_stock} {m.unit})
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
-                            <input className="glass-input" type="number" required placeholder="Quantity Required" value={issueForm.quantity_requested} onChange={e => setIssueForm({ ...issueForm, quantity_requested: e.target.value })} />
-                            <input className="glass-input" required placeholder="Requesting Dept" value={issueForm.requesting_dept} onChange={e => setIssueForm({ ...issueForm, requesting_dept: e.target.value })} />
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                <div>
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Quantity</label>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <input
+                                            className="glass-input"
+                                            type="number"
+                                            required
+                                            min="1"
+                                            placeholder="Qty"
+                                            value={issueForm.quantity_requested}
+                                            onChange={e => setIssueForm({ ...issueForm, quantity_requested: e.target.value })}
+                                            style={{ flex: 1, minWidth: 0 }}
+                                        />
+                                        <span style={{ fontSize: '0.9rem', color: '#fff', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                            {materials.find(m => String(m.id) === String(issueForm.material_id))?.unit || ''}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Dept Type</label>
+                                        <select
+                                            className="glass-input"
+                                            required
+                                            value={deptType}
+                                            onChange={e => setDeptType(e.target.value)}
+                                        >
+                                            <option value="">Type</option>
+                                            <option value="GO">GO</option>
+                                            <option value="CW">CW</option>
+                                            <option value="Vendor">Vendor</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Dept Name</label>
+                                        <input
+                                            className="glass-input"
+                                            required
+                                            placeholder="Name"
+                                            value={deptName}
+                                            onChange={e => setDeptName(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
                             <input className="glass-input" required placeholder="Purpose" value={issueForm.purpose} onChange={e => setIssueForm({ ...issueForm, purpose: e.target.value })} />
+
                             <div>
                                 <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Select Officer</label>
                                 <select className="glass-input" required value={issueForm.officer_id} onChange={e => setIssueForm({ ...issueForm, officer_id: parseInt(e.target.value) })}>
                                     <option value="">-- Select Officer --</option>
                                     {officers.map(officer => (
                                         <option key={officer.id} value={officer.id}>
-                                            {officer.username} ({officer.email || 'No email'})
+                                            {officer.username}
                                         </option>
                                     ))}
                                 </select>
                             </div>
-                            <button className="btn btn-primary">Send to Officer</button>
+
+                            <button className="btn btn-primary" style={{ marginTop: '0.5rem' }}>Send Request to Officer</button>
                         </div>
                     </form>
                 )}
@@ -424,7 +589,9 @@ const StoreDashboard = () => {
                                                 </span>
                                             </td>
                                             <td>{record.material_name || 'Unknown'}</td>
-                                            <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>{record.quantity_requested}</td>
+                                            <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>
+                                                {record.quantity_requested} {record.material_unit}
+                                            </td>
                                             <td>{record.purpose}</td>
                                             <td>{record.requesting_dept}</td>
                                             <td>

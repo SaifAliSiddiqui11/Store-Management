@@ -1,8 +1,14 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Enum, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 import enum
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from backend.database import Base
+
+# Helper function to get current IST time
+def get_ist_now():
+    return datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None)
 
 # Enums based on the workflow
 class UserRole(str, enum.Enum):
@@ -82,7 +88,7 @@ class GateEntry(Base):
     material_type_desc = Column(String, nullable=True) # General description by Guard
     approx_quantity = Column(Integer, nullable=True) 
     
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime, default=get_ist_now)
     created_by_id = Column(Integer, ForeignKey("users.id"))
     
     # Workflow Status
@@ -165,7 +171,7 @@ class InventoryLog(Base):
     balance_after = Column(Integer)
     transaction_type = Column(String) # "INWARD", "ISSUE", "ADJUSTMENT"
     reference_id = Column(String) # Gate Pass No or Issue ID
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime, default=get_ist_now)
     created_by_id = Column(Integer, ForeignKey("users.id"))
     
 class MaterialIssue(Base):
@@ -176,6 +182,7 @@ class MaterialIssue(Base):
     quantity_requested = Column(Integer)
     purpose = Column(String)
     requesting_dept = Column(String)
+    created_at = Column(DateTime, default=get_ist_now)
     
     # Workflow
     status = Column(String, default="PENDING_OFFICER_APPROVAL")
@@ -188,3 +195,15 @@ class MaterialIssue(Base):
     issue_note_id = Column(String, unique=True, nullable=True) # Generated upon approval
     
     material = relationship("Material")
+    
+    @property
+    def material_name(self):
+        return self.material.name if self.material else None
+        
+    @property
+    def material_category(self):
+        return self.material.category if self.material else None
+        
+    @property
+    def material_unit(self):
+        return self.material.unit if self.material else None
