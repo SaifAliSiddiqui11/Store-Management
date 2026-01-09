@@ -4,10 +4,16 @@ from sqlalchemy.orm import Session
 from backend.database import engine, get_db
 from backend import models, schemas, crud, auth
 from datetime import timedelta
+from backend import seed
 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Store Management System")
+
+@app.on_event("startup")
+def startup_event():
+    db = next(get_db())
+    seed.seed_default_users(db)
 
 @app.post("/token", response_model=dict)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
