@@ -1,14 +1,28 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from backend.database import engine, get_db
 from backend import models, schemas, crud, auth
-from datetime import timedelta
+from datetime import timedelta, datetime
 from backend import seed
 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Store Management System")
+
+# CORS Configuration - CRITICAL for Vercel frontend to connect
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://store-management-nine-sand.vercel.app",  # Your Vercel deployment
+        "http://localhost:5173",  # Local development
+        "http://localhost:3000",  # Alternative local port
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
 
 @app.on_event("startup")
 def startup_event():
@@ -341,6 +355,39 @@ def create_material(
 @app.get("/")
 def root():
     return {"message": "Store Management System API is running"}
+
+@app.get("/health")
+def health_check(db: Session = Depends(get_db)):
+    """Health check endpoint to verify database and users"""
+    try:
+        # Check database connectivity
+        user_count = db.query(models.User).count()
+        
+        # Get user details
+        users = db.query(models.User).all()
+        user_details = [
+            {
+                "username": u.username,
+                "role": u.role,
+                "is_active": u.is_active
+            }
+            for u in users
+        ]
+        
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "user_count": user_count,
+            "users": user_details,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "database": "error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 # Material Issue History and Receipt
 @app.get("/store/issue-history")
