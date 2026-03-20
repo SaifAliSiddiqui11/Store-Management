@@ -26,6 +26,16 @@ class UserCreateByAdmin(BaseModel):
     password: str
     role: UserRole
 
+class UserStatusUpdate(BaseModel):
+    is_active: bool
+
+class AdminPasswordUpdate(BaseModel):
+    new_password: str
+
+class OfficerPasswordUpdate(BaseModel):
+    current_password: str
+    new_password: str
+
 class UserListResponse(BaseModel):
     """Simplified user info for listings"""
     id: int
@@ -60,14 +70,61 @@ class MaterialBase(BaseModel):
     description: Optional[str] = None
     category: MaterialCategory
     unit: str
-    min_stock_level: int = 10
+    min_stock_level: int
 
 class MaterialCreate(MaterialBase):
     pass
 
+class MaterialUpdate(BaseModel):
+    """Schema for admin to update material properties"""
+    code: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[MaterialCategory] = None
+    unit: Optional[str] = None
+    min_stock_level: Optional[int] = None
+
 class MaterialResponse(MaterialBase):
     id: int
     current_stock: int
+    
+    class Config:
+        from_attributes = True
+
+
+# --- Material Variant Schemas ---
+class MaterialVariantBase(BaseModel):
+    rating: Optional[str] = None
+    size: Optional[str] = None
+    material_make: Optional[str] = None
+
+
+class MaterialVariantCreate(MaterialVariantBase):
+    material_id: int
+
+
+class MaterialVariantResponse(MaterialVariantBase):
+    id: int
+    material_id: int
+    created_at: datetime
+    total_quantity_received: Optional[int] = 0
+    current_stock: Optional[int] = 0
+    
+    class Config:
+        from_attributes = True
+
+
+class MaterialVariantSuggestion(BaseModel):
+    """Autocomplete suggestions for variant fields"""
+    value: str
+    count: int  # How many times this value appears
+
+
+class MaterialDetail(MaterialBase):
+    """Enhanced material response with variants"""
+    id: int
+    current_stock: int
+    variants: List[MaterialVariantResponse] = []
     
     class Config:
         from_attributes = True
@@ -85,6 +142,15 @@ class GateEntryBase(BaseModel):
 
 class GateEntryCreate(GateEntryBase):
     pass
+
+class GateEntryUpdate(BaseModel):
+    """Schema for updating gate entry details (vendor info and material description)"""
+    vendor_name: Optional[str] = None
+    vendor_location: Optional[str] = None
+    material_type_desc: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 class GateEntryResponse(GateEntryBase):
     id: int
@@ -104,6 +170,7 @@ class ApprovalAction(BaseModel):
 # --- Inward Process Schemas ---
 class InwardItemCreate(BaseModel):
     material_id: Optional[int] = None # Optional for now if master data not fully populated
+    material_variant_id: Optional[int] = None  # Link to material variant
     quantity_received: int
     store_room: Optional[str] = None
     rack_no: Optional[str] = None
@@ -114,6 +181,11 @@ class InwardItemCreate(BaseModel):
     material_category: Optional[str] = None
     material_unit: Optional[str] = None
     min_stock_level: Optional[int] = None
+    
+    # Additional Material Specifications
+    rating: Optional[str] = None
+    size: Optional[str] = None
+    material_make: Optional[str] = None
 
 class InwardProcessCreate(BaseModel):
     invoice_no: str
@@ -131,6 +203,9 @@ class InwardItemUpdate(BaseModel):
     material_description: Optional[str] = None
     material_category: Optional[str] = None
     material_unit: Optional[str] = None
+    rating: Optional[str] = None
+    size: Optional[str] = None
+    material_make: Optional[str] = None
 
 class InwardProcessUpdate(BaseModel):
     invoice_no: Optional[str] = None
@@ -139,15 +214,43 @@ class InwardProcessUpdate(BaseModel):
     items: List[InwardItemUpdate]
 
 # --- Material Issue Schemas ---
-class MaterialIssueBase(BaseModel):
+# --- Material Issue Schemas ---
+class MaterialIssueItemBase(BaseModel):
     material_id: int
-    quantity_requested: int
+    material_variant_id: Optional[int] = None
+    quantity_issued: int
+    material_description: Optional[str] = None
+    material_category: Optional[str] = None
+    material_unit: Optional[str] = None
+    rating: Optional[str] = None
+    size: Optional[str] = None
+    material_make: Optional[str] = None
+    store_room: Optional[str] = None
+    rack_no: Optional[str] = None
+    shelf_no: Optional[str] = None
+    lot_number: Optional[str] = None
+
+class MaterialIssueItemCreate(MaterialIssueItemBase):
+    pass
+
+class MaterialIssueItemResponse(MaterialIssueItemBase):
+    id: int
+    material_issue_id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class MaterialIssueBase(BaseModel):
     purpose: str
     requesting_dept: str
     officer_id: int  # Officer to approve this issue
+    # Legacy fields (optional for backward compatibility)
+    material_id: Optional[int] = None
+    quantity_requested: Optional[int] = None
 
 class MaterialIssueCreate(MaterialIssueBase):
-    pass
+    items: Optional[List[MaterialIssueItemCreate]] = []  # New: support multiple items
 
 class MaterialIssueResponse(MaterialIssueBase):
     id: int
@@ -160,6 +263,7 @@ class MaterialIssueResponse(MaterialIssueBase):
     approver_name: Optional[str] = None
     material_category: Optional[str] = None
     created_at: Optional[datetime] = None
+    items: List[MaterialIssueItemResponse] = []  # New: include items
     
     class Config:
         from_attributes = True
@@ -185,6 +289,7 @@ class StoreItemResponse(BaseModel):
 class InwardItemDetail(BaseModel):
     """Detailed inward item info for Officer review"""
     id: int
+    material_id: Optional[int] = None  # Material ID for autocomplete
     material_code: Optional[str] = None  # From Material Master if linked
     material_description: Optional[str]
     material_category: Optional[str]
@@ -194,6 +299,9 @@ class InwardItemDetail(BaseModel):
     rack_no: Optional[str]
     shelf_no: Optional[str]
     min_stock_level: Optional[int]
+    rating: Optional[str] = None
+    size: Optional[str] = None
+    material_make: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -203,6 +311,7 @@ class InwardItemDetail(BaseModel):
         # Populate material_code from Material relationship if exists
         data = {
             'id': obj.id,
+            'material_id': obj.material_id,
             'material_code': obj.material.code if obj.material else None,
             'material_description': obj.material_description,
             'material_category': obj.material_category,
@@ -211,7 +320,10 @@ class InwardItemDetail(BaseModel):
             'store_room': obj.store_room,
             'rack_no': obj.rack_no,
             'shelf_no': obj.shelf_no,
-            'min_stock_level': obj.min_stock_level
+            'min_stock_level': obj.min_stock_level,
+            'rating': obj.rating,
+            'size': obj.size,
+            'material_make': obj.material_make
         }
         return cls(**data)
 
@@ -236,3 +348,104 @@ class GateEntryDetailedResponse(GateEntryBase):
     
     class Config:
         from_attributes = True
+
+# --- Report Schemas ---
+class InwardReportItem(BaseModel):
+    id: int
+    gate_pass_number: str
+    date: datetime
+    vendor_name: str
+    vendor_location: Optional[str] = None
+    material_description: Optional[str] = None
+    quantity: Optional[int] = None
+    officer_name: str
+    status: str
+    invoice_no: Optional[str] = None
+    invoice_date: Optional[datetime] = None
+    final_approved_at: Optional[datetime] = None
+    remarks: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class InwardReportResponse(BaseModel):
+    data: List[InwardReportItem]
+    total_count: int
+
+# --- Inventory Report Schemas ---
+class InventoryReportItem(BaseModel):
+    material_code: str
+    material_name: str
+    category: str
+    unit: str
+    rating: Optional[str] = None
+    size: Optional[str] = None
+    material_make: Optional[str] = None
+    store_room: Optional[str] = None
+    rack_no: Optional[str] = None
+    shelf_no: Optional[str] = None
+    quantity: int
+
+class InventoryReportResponse(BaseModel):
+    data: List[InventoryReportItem]
+    total_count: int
+
+# --- Issue Report Schemas ---
+class IssueReportItem(BaseModel):
+    id: int
+    issue_note_id: Optional[str] = None
+    date: datetime
+    material_code: str
+    material_name: str
+    category: str
+    unit: str
+    quantity: int
+    rating: Optional[str] = None
+    size: Optional[str] = None
+    material_make: Optional[str] = None
+    department: str
+    purpose: str
+    status: str
+    officer_name: str
+    approved_at: Optional[datetime] = None
+
+class IssueReportResponse(BaseModel):
+    data: List[IssueReportItem]
+    total_count: int
+
+
+# --- Returnables Schemas ---
+class ReturnableEntryBase(BaseModel):
+    material_description: str
+    vendor_name: str
+    reason_for_outward: Optional[str] = None
+    officer_id: int
+
+class ReturnableEntryCreate(ReturnableEntryBase):
+    pass
+
+class ReturnableEntryResponse(ReturnableEntryBase):
+    id: int
+    outward_gate_pass_id: Optional[str] = None
+    inward_gate_pass_id: Optional[str] = None
+    status: str
+    created_at: datetime
+    initiated_by_id: int
+    outward_approved_officer_at: Optional[datetime] = None
+    outward_approved_security_at: Optional[datetime] = None
+    inward_received_security_at: Optional[datetime] = None
+    inward_approved_officer_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    remarks: Optional[str] = None
+    officer_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class ReturnableAction(BaseModel):
+    remarks: Optional[str] = None
+
+class ReturnableEntryUpdate(BaseModel):
+    material_description: Optional[str] = None
+    vendor_name: Optional[str] = None
+    reason_for_outward: Optional[str] = None

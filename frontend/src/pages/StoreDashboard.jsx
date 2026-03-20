@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { ChevronDown, ChevronRight, Plus, Trash2, LogOut } from 'lucide-react'
 import DashboardLayout from '../components/DashboardLayout'
 import api from '../api/axios'
 import StoreInventoryTable from '../components/StoreInventoryTable'
+import MaterialVariantAutocomplete from '../components/MaterialVariantAutocomplete'
 
 const StoreDashboard = () => {
     const [activeTab, setActiveTab] = useState('verification') // verification, inventory, master, issue
@@ -27,15 +30,29 @@ const StoreDashboard = () => {
         description: '',
         category: '',
         unit: '',
+        rating: '',
+        size: '',
+        material_make: '',
         // Gate Entry Updates
         vendor_name: ''
     })
 
+    // New: Issue items array for multi-item support
+    const [issueItems, setIssueItems] = useState([])
+    const [currentIssueItem, setCurrentIssueItem] = useState({
+        material_id: '',
+        material_variant_id: '',
+        quantity_issued: '',
+        rating: '',
+        size: '',
+        material_make: ''
+    })
     const [issueForm, setIssueForm] = useState({
-        material_id: '', quantity_requested: '', purpose: '', officer_id: ''
+        purpose: '', officer_id: ''
     })
     const [deptType, setDeptType] = useState('')
     const [deptName, setDeptName] = useState('')
+    const [selectedMaterialVariants, setSelectedMaterialVariants] = useState([])
 
     const [materialSearch, setMaterialSearch] = useState('')
     const [issueCategory, setIssueCategory] = useState('')
@@ -43,6 +60,9 @@ const StoreDashboard = () => {
     // Catalog Filters
     const [catalogSearch, setCatalogSearch] = useState('')
     const [catalogCategoryFilter, setCatalogCategoryFilter] = useState('')
+    const [expandedMaterialRows, setExpandedMaterialRows] = useState({})
+    const [expandedIssueRows, setExpandedIssueRows] = useState({}) // Track expanded issue records
+
 
     const filteredMaterials = materials.filter(m => {
         const matchesSearch = m.name.toLowerCase().includes(materialSearch.toLowerCase()) ||
@@ -107,7 +127,7 @@ const StoreDashboard = () => {
 
     const downloadReceipt = async (issueId) => {
         try {
-            const response = await api.get(`/issue/${issueId}/receipt`, {
+            const response = await api.get(`/ issue / ${issueId}/receipt`, {
                 responseType: 'blob'
             })
 
@@ -144,8 +164,8 @@ const StoreDashboard = () => {
         }
     }, [activeTab])
 
-    // Auto-populate material details when material selected
-    const handleMaterialSelect = (materialId) => {
+    // Auto-populate material details when material selected for verification
+    const handleVerificationMaterialSelect = (materialId) => {
         const mat = materials.find(m => m.id === parseInt(materialId))
         if (mat) {
             setVerifData(prev => ({
@@ -175,6 +195,9 @@ const StoreDashboard = () => {
                 description: '',
                 category: '',
                 unit: '',
+                rating: '',
+                size: '',
+                material_make: '',
                 vendor_name: selectedItem.vendor_name
             }))
         }
@@ -200,7 +223,11 @@ const StoreDashboard = () => {
                         // Material Master updates
                         material_description: verifData.description,
                         material_category: verifData.category,
-                        material_unit: verifData.unit
+                        material_unit: verifData.unit,
+                        // Additional specifications
+                        rating: verifData.rating,
+                        size: verifData.size,
+                        material_make: verifData.material_make
                     }
                 ]
             }
@@ -212,22 +239,97 @@ const StoreDashboard = () => {
 
 
 
-    const handleRequestIssue = async (e) => {
-        e.preventDefault()
-        try {
-            const payload = {
-                ...issueForm,
-                quantity_requested: parseInt(issueForm.quantity_requested),
-                requesting_dept: `${deptType} - ${deptName}`
+    // Handle material selection to load variants for issue
+    const handleIssueMaterialSelect = async (materialId) => {
+        setCurrentIssueItem({ ...currentIssueItem, material_id: materialId, material_variant_id: '' })
+
+        if (materialId) {
+            // Find material and load its variants
+            const material = materials.find(m => m.id === parseInt(materialId))
+            if (material && material.variants && material.variants.length > 0) {
+                setSelectedMaterialVariants(material.variants)
+            } else {
+                setSelectedMaterialVariants([])
             }
-            await api.post('/issue/request', payload)
-            alert("Issue Requested")
-            setIssueForm({ material_id: '', quantity_requested: '', purpose: '', officer_id: officers.length > 0 ? officers[0].id : '' })
-            setDeptType('')
-            setDeptName('')
-        } catch (e) { alert("Failed") }
+        } else {
+            setSelectedMaterialVariants([])
+        }
     }
 
+    // Add item to issue list
+    const handleAddIssueItem = () => {
+        if (!currentIssueItem.material_id || !currentIssueItem.quantity_issued) {
+            alert('Please select material and enter quantity')
+            return
+        }
+
+        const material = materials.find(m => m.id === parseInt(currentIssueItem.material_id))
+        const variant = selectedMaterialVariants.find(v => v.id === parseInt(currentIssueItem.material_variant_id))
+
+        const maxStock = variant ? variant.current_stock : material?.current_stock;
+
+        if (maxStock !== undefined && parseInt(currentIssueItem.quantity_issued) > maxStock) {
+            alert(`Quantity exceeds available stock (${maxStock})`)
+            return
+        }
+
+        const newItem = {
+            material_id: parseInt(currentIssueItem.material_id),
+            material_variant_id: currentIssueItem.material_variant_id ? parseInt(currentIssueItem.material_variant_id) : null,
+            quantity_issued: parseInt(currentIssueItem.quantity_issued),
+            material_description: material?.description,
+            material_category: material?.category,
+            material_unit: material?.unit,
+            rating: variant?.rating || currentIssueItem.rating,
+            size: variant?.size || currentIssueItem.size,
+            material_make: variant?.material_make || currentIssueItem.material_make,
+            // For display
+            _materialName: material?.name,
+            _materialCode: material?.code
+        }
+
+        setIssueItems([...issueItems, newItem])
+        setCurrentIssueItem({
+            material_id: '',
+            material_variant_id: '',
+            quantity_issued: '',
+            rating: '',
+            size: '',
+            material_make: ''
+        })
+        setSelectedMaterialVariants([])
+    }
+
+    // Remove item from issue list
+    const handleRemoveIssueItem = (index) => {
+        setIssueItems(issueItems.filter((_, i) => i !== index))
+    }
+
+    const handleRequestIssue = async (e) => {
+        e.preventDefault()
+
+        if (issueItems.length === 0) {
+            alert('Please add at least one item to the issue request')
+            return
+        }
+
+        try {
+            const payload = {
+                purpose: issueForm.purpose,
+                officer_id: parseInt(issueForm.officer_id),
+                requesting_dept: `${deptType} - ${deptName}`,
+                items: issueItems
+            }
+            await api.post('/issue/request', payload)
+            alert("Issue Requested Successfully")
+            setIssueForm({ purpose: '', officer_id: officers.length > 0 ? officers[0].id : '' })
+            setIssueItems([])
+            setDeptType('')
+            setDeptName('')
+        } catch (err) {
+            alert(err.response?.data?.detail || "Failed to request issue")
+        }
+    }
     const TabButton = ({ id, label }) => (
         <button onClick={() => setActiveTab(id)} style={{
             background: activeTab === id ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
@@ -237,7 +339,7 @@ const StoreDashboard = () => {
 
     return (
         <DashboardLayout title="Role: Store Manager">
-            <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
                 <TabButton id="verification" label="Pending Verification" />
                 <TabButton id="inventory" label="Store Inventory" />
                 <TabButton id="master" label="Material Master" />
@@ -271,7 +373,7 @@ const StoreDashboard = () => {
 
                                     {/* 2. Material Details */}
                                     <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
-                                        <select className="glass-input" required value={verifData.material_id} onChange={e => handleMaterialSelect(e.target.value)}>
+                                        <select className="glass-input" required value={verifData.material_id} onChange={e => handleVerificationMaterialSelect(e.target.value)}>
                                             <option value="">Select Official Material Code</option>
                                             {materials.map(m => <option key={m.id} value={m.id}>{m.code} - {m.name}</option>)}
                                         </select>
@@ -304,7 +406,38 @@ const StoreDashboard = () => {
                                         </select>
                                     </div>
 
-                                    {/* 3. Receiving & Storage */}
+                                    {/* 3. Additional Material Specifications */}
+                                    <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
+                                        <MaterialVariantAutocomplete
+                                            materialId={verifData.material_id}
+                                            field="rating"
+                                            value={verifData.rating}
+                                            onChange={(value) => setVerifData({ ...verifData, rating: value })}
+                                            label="Rating"
+                                            placeholder="Enter rating..."
+                                            disabled={!verifData.material_id}
+                                        />
+                                        <MaterialVariantAutocomplete
+                                            materialId={verifData.material_id}
+                                            field="size"
+                                            value={verifData.size}
+                                            onChange={(value) => setVerifData({ ...verifData, size: value })}
+                                            label="Size"
+                                            placeholder="Enter size..."
+                                            disabled={!verifData.material_id}
+                                        />
+                                        <MaterialVariantAutocomplete
+                                            materialId={verifData.material_id}
+                                            field="material_make"
+                                            value={verifData.material_make}
+                                            onChange={(value) => setVerifData({ ...verifData, material_make: value })}
+                                            label="Material Make"
+                                            placeholder="Enter material make..."
+                                            disabled={!verifData.material_id}
+                                        />
+                                    </div>
+
+                                    {/* 4. Receiving & Storage */}
                                     <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
                                         <input className="glass-input" required placeholder="Qty (Verified)" type="number" value={verifData.qty_received} onChange={e => setVerifData({ ...verifData, qty_received: e.target.value })} />
                                         <input className="glass-input" placeholder="Store Room" value={verifData.store_room} onChange={e => setVerifData({ ...verifData, store_room: e.target.value })} />
@@ -402,6 +535,7 @@ const StoreDashboard = () => {
                             <table>
                                 <thead>
                                     <tr>
+                                        <th style={{ width: '40px' }}></th>
                                         <th>Code</th>
                                         <th>Name</th>
                                         <th>Category</th>
@@ -417,24 +551,80 @@ const StoreDashboard = () => {
                                             ? ((m.current_stock - m.min_stock_level) / m.min_stock_level) * 100
                                             : 0;
                                         const deviationColor = deviation >= 0 ? 'var(--success)' : 'var(--danger)';
+                                        const hasVariants = m.variants && m.variants.length > 0;
+                                        const isExpanded = expandedMaterialRows[m.id];
+
+                                        const toggleRow = () => {
+                                            setExpandedMaterialRows(prev => ({
+                                                ...prev,
+                                                [m.id]: !prev[m.id]
+                                            }));
+                                        };
 
                                         return (
-                                            <tr key={m.id}>
-                                                <td><span className="badge badge-blue">{m.code}</span></td>
-                                                <td style={{ fontWeight: 600 }}>{m.name}</td>
-                                                <td>{m.category}</td>
-                                                <td>{m.unit}</td>
-                                                <td>{m.min_stock_level}</td>
-                                                <td style={{
-                                                    fontWeight: 'bold',
-                                                    color: m.current_stock < m.min_stock_level ? 'var(--danger)' : 'var(--success)'
-                                                }}>
-                                                    {m.current_stock}
-                                                </td>
-                                                <td style={{ fontWeight: 'bold', color: deviationColor }}>
-                                                    {deviation > 0 ? '+' : ''}{deviation.toFixed(1)}%
-                                                </td>
-                                            </tr>
+                                            <>
+                                                <tr key={m.id} onClick={hasVariants ? toggleRow : undefined} style={{ cursor: hasVariants ? 'pointer' : 'default' }}>
+                                                    <td>
+                                                        {hasVariants && (
+                                                            <button
+                                                                className="btn-icon"
+                                                                style={{ padding: 0, background: 'none', border: 'none', color: 'var(--text-muted)' }}
+                                                            >
+                                                                {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                    <td><span className="badge badge-blue">{m.code}</span></td>
+                                                    <td style={{ fontWeight: 600 }}>{m.name}</td>
+                                                    <td>{m.category}</td>
+                                                    <td>{m.unit}</td>
+                                                    <td>{m.min_stock_level}</td>
+                                                    <td style={{
+                                                        fontWeight: 'bold',
+                                                        color: m.current_stock < m.min_stock_level ? 'var(--danger)' : 'var(--success)'
+                                                    }}>
+                                                        {m.current_stock}
+                                                    </td>
+                                                    <td style={{ fontWeight: 'bold', color: deviationColor }}>
+                                                        {deviation > 0 ? '+' : ''}{deviation.toFixed(1)}%
+                                                    </td>
+                                                </tr>
+                                                {isExpanded && hasVariants && (
+                                                    <tr>
+                                                        <td colSpan="8" style={{ padding: 0, background: 'rgba(255,255,255,0.02)' }}>
+                                                            <div style={{ padding: '1rem 2rem' }}>
+                                                                <h5 style={{ marginTop: 0, marginBottom: '0.5rem', color: 'var(--text-muted)' }}>Variants</h5>
+                                                                <table style={{ width: '100%', fontSize: '0.9rem' }}>
+                                                                    <thead>
+                                                                        <tr style={{ background: 'none' }}>
+                                                                            <th style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>Rating</th>
+                                                                            <th style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>Size</th>
+                                                                            <th style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>Make</th>
+                                                                            <th style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>Current Stock</th>
+                                                                            <th style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>Created</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {m.variants.map(v => (
+                                                                            <tr key={v.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                                                <td style={{ padding: '0.5rem' }}>{v.rating || '-'}</td>
+                                                                                <td style={{ padding: '0.5rem' }}>{v.size || '-'}</td>
+                                                                                <td style={{ padding: '0.5rem' }}>{v.material_make || '-'}</td>
+                                                                                <td style={{ padding: '0.5rem', fontWeight: 'bold', color: 'var(--success)' }}>
+                                                                                    {v.current_stock || 0}
+                                                                                </td>
+                                                                                <td style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>
+                                                                                    {new Date(v.created_at).toLocaleDateString()}
+                                                                                </td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </>
                                         )
                                     })}
                                 </tbody>
@@ -444,73 +634,203 @@ const StoreDashboard = () => {
                 )}
 
                 {activeTab === 'issue' && (
-                    <form onSubmit={handleRequestIssue} style={{ maxWidth: '600px' }}>
+                    <div style={{ maxWidth: '900px' }}>
                         <h3>Raise Material Issue Request</h3>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                <div>
-                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Filter by Category</label>
-                                    <select
-                                        className="glass-input"
-                                        value={issueCategory}
-                                        onChange={e => setIssueCategory(e.target.value)}
-                                    >
-                                        <option value="">All Categories</option>
-                                        <option value="CONSUMABLE">Consumable</option>
-                                        <option value="SPARE">Spare</option>
-                                        <option value="ASSET">Asset</option>
-                                        <option value="FIRE_AND_SAFETY">Fire and Safety</option>
-                                        <option value="AUTOMATION">Automation</option>
-                                        <option value="ELECTRICAL">Electrical</option>
-                                        <option value="MECHANICAL">Mechanical</option>
-                                        <option value="CHEMICALS">Chemicals</option>
-                                        <option value="OILS_AND_LUBRICANTS">Oils and Lubricants</option>
-                                        <option value="STATIONARY">Stationary</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Search Material</label>
-                                    <input
-                                        className="glass-input"
-                                        placeholder="Name or Code..."
-                                        value={materialSearch}
-                                        onChange={e => setMaterialSearch(e.target.value)}
-                                    />
-                                </div>
-                            </div>
 
-                            <div>
-                                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Select Material</label>
-                                <select className="glass-input" required value={issueForm.material_id} onChange={e => setIssueForm({ ...issueForm, material_id: e.target.value })}>
-                                    <option value="">-- Select Material --</option>
-                                    {filteredMaterials.map(m => (
-                                        <option key={m.id} value={m.id}>
-                                            {m.code} - {m.name} (Stock: {m.current_stock} {m.unit})
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                <div>
-                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Quantity</label>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        {/* Add Item Section */}
+                        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '1.5rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
+                            <h4 style={{ marginTop: 0, marginBottom: '1rem' }}>Add Items</h4>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Filter by Category</label>
+                                        <select
+                                            className="glass-input"
+                                            value={issueCategory}
+                                            onChange={e => setIssueCategory(e.target.value)}
+                                        >
+                                            <option value="">All Categories</option>
+                                            <option value="CONSUMABLE">Consumable</option>
+                                            <option value="SPARE">Spare</option>
+                                            <option value="ASSET">Asset</option>
+                                            <option value="FIRE_AND_SAFETY">Fire and Safety</option>
+                                            <option value="AUTOMATION">Automation</option>
+                                            <option value="ELECTRICAL">Electrical</option>
+                                            <option value="MECHANICAL">Mechanical</option>
+                                            <option value="CHEMICALS">Chemicals</option>
+                                            <option value="OILS_AND_LUBRICANTS">Oils and Lubricants</option>
+                                            <option value="STATIONARY">Stationary</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Search Material</label>
                                         <input
                                             className="glass-input"
-                                            type="number"
-                                            required
-                                            min="1"
-                                            placeholder="Qty"
-                                            value={issueForm.quantity_requested}
-                                            onChange={e => setIssueForm({ ...issueForm, quantity_requested: e.target.value })}
-                                            style={{ flex: 1, minWidth: 0 }}
+                                            placeholder="Name or Code..."
+                                            value={materialSearch}
+                                            onChange={e => setMaterialSearch(e.target.value)}
                                         />
-                                        <span style={{ fontSize: '0.9rem', color: '#fff', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                            {materials.find(m => String(m.id) === String(issueForm.material_id))?.unit || ''}
-                                        </span>
                                     </div>
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+
+                                <div>
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Select Material</label>
+                                    <select
+                                        className="glass-input"
+                                        value={currentIssueItem.material_id}
+                                        onChange={e => handleIssueMaterialSelect(e.target.value)}
+                                    >
+                                        <option value="">-- Select Material --</option>
+                                        {filteredMaterials.map(m => (
+                                            <option key={m.id} value={m.id}>
+                                                {m.code} - {m.name} (Stock: {m.current_stock} {m.unit})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {selectedMaterialVariants.length > 0 && (
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Select Variant (Optional)</label>
+                                        <select
+                                            className="glass-input"
+                                            value={currentIssueItem.material_variant_id}
+                                            onChange={e => setCurrentIssueItem({ ...currentIssueItem, material_variant_id: e.target.value })}
+                                        >
+                                            <option value="">-- No Specific Variant --</option>
+                                            {selectedMaterialVariants.map(v => (
+                                                <option key={v.id} value={v.id}>
+                                                    {v.rating && `Rating: ${v.rating}`} {v.size && `| Size: ${v.size}`} {v.material_make && `| Make: ${v.material_make}`} (Stock: {v.current_stock})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', alignItems: 'end' }}>
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Quantity</label>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', position: 'relative' }}>
+                                            <input
+                                                className="glass-input"
+                                                type="number"
+                                                min="1"
+                                                max={(() => {
+                                                    const mat = materials.find(m => String(m.id) === String(currentIssueItem.material_id));
+                                                    const variant = selectedMaterialVariants.find(v => String(v.id) === String(currentIssueItem.material_variant_id));
+                                                    return variant ? variant.current_stock : mat?.current_stock;
+                                                })()}
+                                                placeholder={(() => {
+                                                    const mat = materials.find(m => String(m.id) === String(currentIssueItem.material_id));
+                                                    const variant = selectedMaterialVariants.find(v => String(v.id) === String(currentIssueItem.material_variant_id));
+                                                    const stock = variant ? variant.current_stock : mat?.current_stock;
+                                                    return stock !== undefined ? `Max: ${stock}` : "Qty";
+                                                })()}
+                                                value={currentIssueItem.quantity_issued}
+                                                onChange={e => {
+                                                    const val = parseInt(e.target.value);
+                                                    const mat = materials.find(m => String(m.id) === String(currentIssueItem.material_id));
+                                                    const variant = selectedMaterialVariants.find(v => String(v.id) === String(currentIssueItem.material_variant_id));
+                                                    const maxStock = variant ? variant.current_stock : mat?.current_stock;
+
+                                                    // Allow clearing the input (NaN) but check max if a number is entered
+                                                    if (maxStock !== undefined && val > maxStock) {
+                                                        alert(`Cannot issue more than available stock: ${maxStock}`);
+                                                        return;
+                                                    }
+                                                    setCurrentIssueItem({ ...currentIssueItem, quantity_issued: e.target.value })
+                                                }}
+                                                style={{ flex: 1, paddingRight: '4rem' }}
+                                            />
+                                            {currentIssueItem.material_id && (
+                                                <span style={{ position: 'absolute', right: '70px', fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)', pointerEvents: 'none' }}>
+                                                    / {(() => {
+                                                        const mat = materials.find(m => String(m.id) === String(currentIssueItem.material_id));
+                                                        const variant = selectedMaterialVariants.find(v => String(v.id) === String(currentIssueItem.material_variant_id));
+                                                        return variant ? variant.current_stock : mat?.current_stock;
+                                                    })()}
+                                                </span>
+                                            )}
+                                            <span style={{ fontSize: '0.9rem', color: '#fff', fontWeight: 600, minWidth: '40px' }}>
+                                                {materials.find(m => String(m.id) === String(currentIssueItem.material_id))?.unit || ''}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleAddIssueItem}
+                                        className="btn-primary"
+                                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                                    >
+                                        <Plus size={18} /> Add Item
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Items List */}
+                        {issueItems.length > 0 && (
+                            <div style={{ background: 'rgba(255,255,255,0.05)', padding: '1.5rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
+                                <h4 style={{ marginTop: 0, marginBottom: '1rem' }}>Items to Issue ({issueItems.length})</h4>
+                                <table style={{ width: '100%', fontSize: '0.9rem' }}>
+                                    <thead>
+                                        <tr>
+                                            <th style={{ textAlign: 'left', padding: '0.5rem' }}>Material</th>
+                                            <th style={{ textAlign: 'left', padding: '0.5rem' }}>Variant</th>
+                                            <th style={{ textAlign: 'right', padding: '0.5rem' }}>Quantity</th>
+                                            <th style={{ textAlign: 'center', padding: '0.5rem' }}>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {issueItems.map((item, index) => (
+                                            <tr key={index} style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                                                <td style={{ padding: '0.5rem' }}>
+                                                    <div style={{ fontWeight: 600 }}>{item._materialCode} - {item._materialName}</div>
+                                                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{item.material_category}</div>
+                                                </td>
+                                                <td style={{ padding: '0.5rem', fontSize: '0.85rem' }}>
+                                                    {item.rating || item.size || item.material_make ? (
+                                                        <div>
+                                                            {item.rating && <div>Rating: {item.rating}</div>}
+                                                            {item.size && <div>Size: {item.size}</div>}
+                                                            {item.material_make && <div>Make: {item.material_make}</div>}
+                                                        </div>
+                                                    ) : (
+                                                        <span style={{ color: 'var(--text-muted)' }}>No variant</span>
+                                                    )}
+                                                </td>
+                                                <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>
+                                                    {item.quantity_issued} {item.material_unit}
+                                                </td>
+                                                <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleRemoveIssueItem(index)}
+                                                        style={{
+                                                            background: 'var(--danger)',
+                                                            border: 'none',
+                                                            padding: '0.4rem 0.8rem',
+                                                            borderRadius: '4px',
+                                                            cursor: 'pointer',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '0.3rem'
+                                                        }}
+                                                    >
+                                                        <Trash2 size={14} /> Remove
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* Issue Request Form */}
+                        <form onSubmit={handleRequestIssue}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                                     <div>
                                         <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Dept Type</label>
                                         <select
@@ -536,25 +856,38 @@ const StoreDashboard = () => {
                                         />
                                     </div>
                                 </div>
+
+                                <input
+                                    className="glass-input"
+                                    required
+                                    placeholder="Purpose"
+                                    value={issueForm.purpose}
+                                    onChange={e => setIssueForm({ ...issueForm, purpose: e.target.value })}
+                                />
+
+                                <div>
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Select Officer</label>
+                                    <select
+                                        className="glass-input"
+                                        required
+                                        value={issueForm.officer_id}
+                                        onChange={e => setIssueForm({ ...issueForm, officer_id: parseInt(e.target.value) })}
+                                    >
+                                        <option value="">-- Select Officer --</option>
+                                        {officers.map(officer => (
+                                            <option key={officer.id} value={officer.id}>
+                                                {officer.username}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <button type="submit" className="btn-primary" style={{ marginTop: '1rem' }}>
+                                    Send Request to Officer
+                                </button>
                             </div>
-
-                            <input className="glass-input" required placeholder="Purpose" value={issueForm.purpose} onChange={e => setIssueForm({ ...issueForm, purpose: e.target.value })} />
-
-                            <div>
-                                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Select Officer</label>
-                                <select className="glass-input" required value={issueForm.officer_id} onChange={e => setIssueForm({ ...issueForm, officer_id: parseInt(e.target.value) })}>
-                                    <option value="">-- Select Officer --</option>
-                                    {officers.map(officer => (
-                                        <option key={officer.id} value={officer.id}>
-                                            {officer.username}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <button className="btn btn-primary" style={{ marginTop: '0.5rem' }}>Send Request to Officer</button>
-                        </div>
-                    </form>
+                        </form>
+                    </div>
                 )}
 
                 {activeTab === 'records' && (
@@ -571,8 +904,7 @@ const StoreDashboard = () => {
                                 <thead>
                                     <tr>
                                         <th>Issue ID</th>
-                                        <th>Material</th>
-                                        <th>Quantity</th>
+                                        <th>Materials</th>
                                         <th>Purpose</th>
                                         <th>Department</th>
                                         <th>Status</th>
@@ -581,40 +913,123 @@ const StoreDashboard = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {issueRecords.map(record => (
-                                        <tr key={record.id}>
-                                            <td>
-                                                <span className="badge badge-blue">
-                                                    {record.issue_note_id || `ISS-${record.id}`}
-                                                </span>
-                                            </td>
-                                            <td>{record.material_name || 'Unknown'}</td>
-                                            <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>
-                                                {record.quantity_requested} {record.material_unit}
-                                            </td>
-                                            <td>{record.purpose}</td>
-                                            <td>{record.requesting_dept}</td>
-                                            <td>
-                                                <span className={`badge ${record.status === 'APPROVED' ? 'badge-success' : record.status === 'REJECTED' ? 'badge-danger' : 'badge-warning'}`}>
-                                                    {record.status}
-                                                </span>
-                                            </td>
-                                            <td>{record.approved_at ? new Date(record.approved_at).toLocaleString('en-IN') : '-'}</td>
-                                            <td>
-                                                {record.status === 'APPROVED' && (
-                                                    <a
-                                                        href={`http://localhost:8000/issue/${record.id}/receipt`}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="btn btn-sm btn-success"
-                                                        style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', textDecoration: 'none' }}
-                                                    >
-                                                        Download Receipt
-                                                    </a>
+                                    {issueRecords.map(record => {
+                                        const hasItems = record.items && record.items.length > 0
+                                        const itemCount = hasItems ? record.items.length : (record.material_name ? 1 : 0)
+                                        const isExpanded = expandedIssueRows[record.id] || false
+
+                                        return (
+                                            <React.Fragment key={record.id}>
+                                                <tr>
+                                                    <td>
+                                                        <span className="badge badge-blue">
+                                                            {record.issue_note_id || `ISS-${record.id}`}
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        {hasItems ? (
+                                                            <div>
+                                                                <div style={{ fontWeight: 600 }}>
+                                                                    {itemCount} item{itemCount > 1 ? 's' : ''}
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => setExpandedIssueRows(prev => ({
+                                                                        ...prev,
+                                                                        [record.id]: !prev[record.id]
+                                                                    }))}
+                                                                    style={{
+                                                                        background: 'none',
+                                                                        border: 'none',
+                                                                        color: 'var(--primary)',
+                                                                        cursor: 'pointer',
+                                                                        fontSize: '0.85rem',
+                                                                        padding: '0.2rem 0',
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        gap: '0.3rem'
+                                                                    }}
+                                                                >
+                                                                    {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                                                    {isExpanded ? 'Hide' : 'Show'} details
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <div>
+                                                                <div style={{ fontWeight: 600 }}>{record.material_name || 'Unknown'}</div>
+                                                                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                                                                    {record.quantity_requested} {record.material_unit}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td>{record.purpose}</td>
+                                                    <td>{record.requesting_dept}</td>
+                                                    <td>
+                                                        <span className={`badge ${record.status === 'APPROVED' ? 'badge-success' : record.status === 'REJECTED' ? 'badge-danger' : 'badge-warning'}`}>
+                                                            {record.status}
+                                                        </span>
+                                                    </td>
+                                                    <td>{record.created_at ? new Date(record.created_at).toLocaleString('en-IN') : '-'}</td>
+                                                    <td>
+                                                        {record.status === 'APPROVED' && (
+                                                            <a
+                                                                href={`http://localhost:8000/issue/${record.id}/receipt`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="btn btn-sm btn-success"
+                                                                style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', textDecoration: 'none' }}
+                                                            >
+                                                                Download Receipt
+                                                            </a>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                                {isExpanded && hasItems && (
+                                                    <tr>
+                                                        <td colSpan="7" style={{ padding: 0, background: 'rgba(255,255,255,0.02)' }}>
+                                                            <div style={{ padding: '1rem 2rem' }}>
+                                                                <table style={{ width: '100%', fontSize: '0.9rem' }}>
+                                                                    <thead>
+                                                                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                                                                            <th style={{ textAlign: 'left', padding: '0.5rem', fontWeight: 600 }}>Material</th>
+                                                                            <th style={{ textAlign: 'left', padding: '0.5rem', fontWeight: 600 }}>Variant Details</th>
+                                                                            <th style={{ textAlign: 'right', padding: '0.5rem', fontWeight: 600 }}>Quantity</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {record.items.map((item, idx) => (
+                                                                            <tr key={idx} style={{ borderBottom: idx < record.items.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                                                                                <td style={{ padding: '0.5rem' }}>
+                                                                                    <div style={{ fontWeight: 600 }}>{item.material_description}</div>
+                                                                                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                                                                                        {item.material_category}
+                                                                                    </div>
+                                                                                </td>
+                                                                                <td style={{ padding: '0.5rem', fontSize: '0.85rem' }}>
+                                                                                    {item.rating || item.size || item.material_make ? (
+                                                                                        <div>
+                                                                                            {item.rating && <div>Rating: {item.rating}</div>}
+                                                                                            {item.size && <div>Size: {item.size}</div>}
+                                                                                            {item.material_make && <div>Make: {item.material_make}</div>}
+                                                                                        </div>
+                                                                                    ) : (
+                                                                                        <span style={{ color: 'var(--text-muted)' }}>No variant</span>
+                                                                                    )}
+                                                                                </td>
+                                                                                <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, color: 'var(--primary)' }}>
+                                                                                    {item.quantity_issued} {item.material_unit}
+                                                                                </td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
                                                 )}
-                                            </td>
-                                        </tr>
-                                    ))}
+                                            </React.Fragment>
+                                        )
+                                    })}
                                 </tbody>
                             </table>
                         )}

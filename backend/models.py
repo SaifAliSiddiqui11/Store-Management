@@ -67,6 +67,28 @@ class Material(Base):
     min_stock_level = Column(Integer, default=10) # Alert threshold
     
     current_stock = Column(Integer, default=0) # Denormalized for quick access
+    
+    # Relationship to variants
+    variants = relationship("MaterialVariant", back_populates="material")
+
+
+class MaterialVariant(Base):
+    """
+    Stores unique combinations of rating, size, and material_make for each material.
+    This allows tracking sub-categories and provides autocomplete suggestions.
+    """
+    __tablename__ = "material_variants"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    material_id = Column(Integer, ForeignKey("materials.id"), nullable=False)
+    rating = Column(String, nullable=True)  # Material rating/grade
+    size = Column(String, nullable=True)  # Material size/dimensions
+    material_make = Column(String, nullable=True)  # Material manufacturer/make
+    created_at = Column(DateTime, default=get_ist_now)
+    
+    # Relationships
+    material = relationship("Material", back_populates="variants")
+    inward_items = relationship("InwardItem", back_populates="material_variant")
 
 # --- Transactions ---
 
@@ -142,6 +164,7 @@ class InwardItem(Base):
     inward_process_id = Column(Integer, ForeignKey("inward_processes.id"))
     
     material_id = Column(Integer, ForeignKey("materials.id"), nullable=True) # Linked to master
+    material_variant_id = Column(Integer, ForeignKey("material_variants.id"), nullable=True) # Linked to variant
     quantity_received = Column(Integer)
     
     # Material details (direct text entry)
@@ -149,6 +172,11 @@ class InwardItem(Base):
     material_category = Column(String, nullable=True)
     material_unit = Column(String, nullable=True)
     min_stock_level = Column(Integer, nullable=True)
+    
+    # Additional Material Specifications
+    rating = Column(String, nullable=True)  # Material rating/grade
+    size = Column(String, nullable=True)  # Material size/dimensions
+    material_make = Column(String, nullable=True)  # Material manufacturer/make
     
     # Storage Location
     store_room = Column(String, nullable=True)
@@ -161,6 +189,7 @@ class InwardItem(Base):
 
     inward_process = relationship("InwardProcess", back_populates="items")
     material = relationship("Material")
+    material_variant = relationship("MaterialVariant", back_populates="inward_items")
 
 class InventoryLog(Base):
     __tablename__ = "inventory_logs"
@@ -178,8 +207,11 @@ class MaterialIssue(Base):
     __tablename__ = "material_issues"
 
     id = Column(Integer, primary_key=True, index=True)
-    material_id = Column(Integer, ForeignKey("materials.id"))
-    quantity_requested = Column(Integer)
+    
+    # Legacy fields (kept for backward compatibility)
+    material_id = Column(Integer, ForeignKey("materials.id"), nullable=True)
+    quantity_requested = Column(Integer, nullable=True)
+    
     purpose = Column(String)
     requesting_dept = Column(String)
     created_at = Column(DateTime, default=get_ist_now)
@@ -194,7 +226,10 @@ class MaterialIssue(Base):
     # Issue Note
     issue_note_id = Column(String, unique=True, nullable=True) # Generated upon approval
     
+    # Relationships
     material = relationship("Material")
+    items = relationship("MaterialIssueItem", back_populates="material_issue")
+    officer = relationship("User", foreign_keys=[officer_id])
     
     @property
     def material_name(self):
@@ -207,3 +242,92 @@ class MaterialIssue(Base):
     @property
     def material_unit(self):
         return self.material.unit if self.material else None
+
+
+class MaterialIssueItem(Base):
+    """
+    Detailed items for material issues - mirrors InwardItem structure
+    Enables tracking of specific variants and multiple items per issue
+    """
+    __tablename__ = "material_issue_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    material_issue_id = Column(Integer, ForeignKey("material_issues.id"))
+    
+    # Material Reference
+    material_id = Column(Integer, ForeignKey("materials.id"))
+    material_variant_id = Column(Integer, ForeignKey("material_variants.id"), nullable=True)
+    quantity_issued = Column(Integer)
+    
+    # Material details (for reference/audit)
+    material_description = Column(String, nullable=True)
+    material_category = Column(String, nullable=True)
+    material_unit = Column(String, nullable=True)
+    
+    # Variant Specifications
+    rating = Column(String, nullable=True)
+    size = Column(String, nullable=True)
+    material_make = Column(String, nullable=True)
+    
+    # Storage Location (where picked from)
+    store_room = Column(String, nullable=True)
+    rack_no = Column(String, nullable=True)
+    shelf_no = Column(String, nullable=True)
+    
+    # Lot tracking
+    lot_number = Column(String, nullable=True)
+    
+    # Relationships
+    material_issue = relationship("MaterialIssue", back_populates="items")
+    material = relationship("Material")
+    material_variant = relationship("MaterialVariant")
+
+
+class ReturnableStatus(str, enum.Enum):
+    PENDING_OFFICER_OUTWARD = "PENDING_OFFICER_OUTWARD"
+    REJECTED_OFFICER_OUTWARD = "REJECTED_OFFICER_OUTWARD"
+    PENDING_SECURITY_OUTWARD = "PENDING_SECURITY_OUTWARD"
+    OUTWARD_COMPLETED = "OUTWARD_COMPLETED"  # Out gate pass generated
+    PENDING_SECURITY_INWARD = "PENDING_SECURITY_INWARD" # When vendor returns
+    PENDING_OFFICER_INWARD = "PENDING_OFFICER_INWARD"
+    PENDING_STORE_MANAGER_FINAL = "PENDING_STORE_MANAGER_FINAL"
+    COMPLETED = "COMPLETED"
+
+
+class ReturnableEntry(Base):
+    __tablename__ = "returnable_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    outward_gate_pass_id = Column(String, unique=True, index=True) # Generated (e.g., RET-OUT-001)
+    inward_gate_pass_id = Column(String, unique=True, index=True, nullable=True) # Generated (e.g., RET-IN-001)
+    
+    material_description = Column(String, nullable=False)
+    vendor_name = Column(String, nullable=False)
+    reason_for_outward = Column(String, nullable=True) # e.g., Maintenance/Repair
+    
+    # Timeline
+    created_at = Column(DateTime, default=get_ist_now)
+    outward_approved_officer_at = Column(DateTime, nullable=True)
+    outward_approved_security_at = Column(DateTime, nullable=True)
+    inward_received_security_at = Column(DateTime, nullable=True)
+    inward_approved_officer_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    # Roles involved
+    initiated_by_id = Column(Integer, ForeignKey("users.id")) # Store Manager
+    officer_id = Column(Integer, ForeignKey("users.id")) # Concerned Officer
+    
+    # Status
+    status = Column(String, default=ReturnableStatus.PENDING_OFFICER_OUTWARD)
+    
+    # Remarks/History (Simplified for now)
+    remarks = Column(Text, nullable=True)
+
+    # Relationships
+    initiator = relationship("User", foreign_keys=[initiated_by_id])
+    officer = relationship("User", foreign_keys=[officer_id])
+
+    @property
+    def officer_name(self):
+        return self.officer.username if self.officer else None
+

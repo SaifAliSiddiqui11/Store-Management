@@ -5,6 +5,10 @@ import SecurityDashboard from './pages/SecurityDashboard'
 import OfficerDashboard from './pages/OfficerDashboard'
 import StoreDashboard from './pages/StoreDashboard'
 import AdminDashboard from './pages/AdminDashboard'
+import MaterialInwardReport from './pages/MaterialInwardReport'
+import InventoryReport from './pages/InventoryReport'
+import MaterialIssueReport from './pages/MaterialIssueReport'
+import Returnables from './pages/Returnables'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
@@ -18,6 +22,12 @@ function App() {
                 <Route path="/dashboard" element={
                     <ProtectedRoute>
                         <DashboardResolver />
+                    </ProtectedRoute>
+                } />
+
+                <Route path="/returnables" element={
+                    <ProtectedRoute>
+                        <Returnables />
                     </ProtectedRoute>
                 } />
 
@@ -43,6 +53,24 @@ function App() {
                 <Route path="/admin/*" element={
                     <ProtectedRoute roles={['ADMIN']}>
                         <AdminDashboard />
+                    </ProtectedRoute>
+                } />
+
+                <Route path="/reports/material-inward" element={
+                    <ProtectedRoute roles={['OFFICER', 'ADMIN']}>
+                        <MaterialInwardReport />
+                    </ProtectedRoute>
+                } />
+
+                <Route path="/reports/inventory" element={
+                    <ProtectedRoute roles={['OFFICER', 'ADMIN', 'STORE_MANAGER']}>
+                        <InventoryReport />
+                    </ProtectedRoute>
+                } />
+
+                <Route path="/reports/material-issue" element={
+                    <ProtectedRoute roles={['OFFICER', 'ADMIN', 'STORE_MANAGER']}>
+                        <MaterialIssueReport />
                     </ProtectedRoute>
                 } />
 

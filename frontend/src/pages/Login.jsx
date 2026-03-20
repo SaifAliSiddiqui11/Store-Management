@@ -23,7 +23,7 @@ const Login = () => {
     return (
         <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
             <div className="glass-panel" style={{ width: '100%', maxWidth: '400px', padding: '2rem' }}>
-                <h2 className="page-title" style={{ textAlign: 'center', marginBottom: '2rem' }}>SafeStore</h2>
+                <h2 className="page-title" style={{ textAlign: 'center', marginBottom: '2rem' }}>My BPCL Store</h2>
 
                 {error && (
                     <div className="badge badge-danger" style={{ display: 'block', textAlign: 'center', marginBottom: '1rem' }}>

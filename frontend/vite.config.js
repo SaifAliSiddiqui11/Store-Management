@@ -15,6 +15,9 @@ export default defineConfig({
             '/store': { target: 'http://127.0.0.1:8000', changeOrigin: true },
             '/issue': { target: 'http://127.0.0.1:8000', changeOrigin: true },
             '/materials': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+            '/security': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+            '/reports': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+            '/returnables': { target: 'http://127.0.0.1:8000', changeOrigin: true },
         }
     }
 })
