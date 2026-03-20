@@ -17,7 +17,7 @@ models.Base.metadata.create_all(bind=engine)
 app = FastAPI(title="My BPCL Store Management System")
 
 # CORS Configuration - Dynamic for production
-cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000")
+cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000,https://store-management-nine-sand.vercel.app")
 allow_origins = [origin.strip() for origin in cors_origins_str.split(",")]
 
 app.add_middleware(
